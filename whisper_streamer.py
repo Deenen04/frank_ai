@@ -42,6 +42,7 @@ class WhisperStreamer:  # pylint: disable=too-many-instance-attributes
         punctuate: bool = True,  # whisper already outputs punctuation
         model: str = "small",  # whisper model size to load ("tiny", "base", "small", "medium", "large")
         language: str = "multi",
+        allowed_languages: Optional[List[str]] = None,
         use_amplitude_vad: bool = True,
         amplitude_threshold_db: float = -5.0,
         silence_timeout: float = 1.2,
@@ -49,7 +50,6 @@ class WhisperStreamer:  # pylint: disable=too-many-instance-attributes
         # --- public config ------------------------------------------------
         self.encoding = encoding.lower()
         self.sample_rate_in = sample_rate
-        self.language = language.lower() if language else "multi"
         self._use_amp_vad = use_amplitude_vad
         self._silence_timeout = silence_timeout
         self._punctuate = punctuate
@@ -93,12 +93,17 @@ class WhisperStreamer:  # pylint: disable=too-many-instance-attributes
             "on_utterance": None,
         }
 
+        self._language_locked = False  # once model detects, we lock for this call
+        self.language = language.lower() if language else "multi"
+        self._allowed_languages = ["en", "fr", "de"] if allowed_languages is None else [l.lower() for l in allowed_languages]
+
         log.info(
-            "[Whisper-INIT] Using faster-whisper model '%s', amp-threshold %.1f dB (→ %.0f), silence %.1fs",
+            "[Whisper-INIT] Using faster-whisper model '%s', amp-threshold %.1f dB (→ %.0f), silence %.1fs, allowed=%s",
             self._model_name,
             amplitude_threshold_db,
             self._amp_threshold_linear,
             silence_timeout,
+            self._allowed_languages,
         )
 
     # ------------------------------------------------------------------
@@ -240,10 +245,29 @@ class WhisperStreamer:  # pylint: disable=too-many-instance-attributes
         audio_int16 = np.frombuffer(pcm16k_bytes, dtype=np.int16)
         audio_float32 = audio_int16.astype("float32") / 32768.0
 
+        # ------------------------------------------------------------------
+        # Language selection / restriction
+        # ------------------------------------------------------------------
+        whisper_language: Optional[str]
+        if self.language == "multi":
+            # Use model's language detection on the segment.
+            try:
+                lang_probs, _ = self._model.detect_language(audio_float32)
+                whisper_language = max(lang_probs, key=lang_probs.get)
+            except Exception as e:  # pragma: no cover
+                log.error("Language detection failed: %s", e)
+                whisper_language = None
+
+            if whisper_language is None or whisper_language not in self._allowed_languages:
+                log.debug("[Whisper] Skipping segment – detected lang '%s' not in %s", whisper_language, self._allowed_languages)
+                return  # ignore this segment entirely
+        else:
+            whisper_language = self.language
+
         try:
             segments, _info = self._model.transcribe(
                 audio_float32,
-                language=None if self.language == "multi" else self.language,
+                language=whisper_language,
                 beam_size=5,
                 word_timestamps=False,
             )

@@ -64,7 +64,7 @@ class WhisperStreamer:  # pylint: disable=too-many-instance-attributes
         if self.encoding in {"mulaw", "ulaw"}:
             # The user requested a *fixed* minimum RMS of 1000 for μ-law.
             # Anything below that is treated as silence / noise.
-            self._amp_threshold_linear = 1000.0
+            self._amp_threshold_linear = 2000.0
         else:
             # Linear PCM: convert dB value to linear scale.
             self._amp_threshold_linear = 32768 * (10 ** (amplitude_threshold_db / 20.0))

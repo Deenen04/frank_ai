@@ -92,7 +92,8 @@ async def make_openai_request_stream(
         "top_p": top_p,
     }
 
-    url_stream = "https://pad-playstation-writing-mas.trycloudflare.com/api/generate"
+    url_stream = "http://localhost:21434/api/generate"
+   
 
     buffer: List[str] = []  # buffer for chunks we will yield
     cumulative_text: str = ""  # track text already emitted to avoid duplicates when endpoint sends cumulative payloads

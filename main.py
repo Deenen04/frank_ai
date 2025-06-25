@@ -19,7 +19,7 @@ from starlette.websockets import WebSocketState # Import for checking WebSocket 
 from deepgram_test import DeepgramStreamer
 from elevenlabs.client import ElevenLabs
 # Streaming generation helper
-from apiChatCompletion import make_openai_request_stream, make_openai_request
+from apiChatCompletion import make_openai_request
 # We still need safe_format and prompt templates for decision making
 from ai_executor import safe_format
 # Import language‐specific prompt templates
@@ -306,8 +306,6 @@ async def media_websocket_endpoint(ws: WebSocket): # Renamed `media`
             if tts_controller.is_speaking:
                 log.info("[PROCESS_UTTERANCE] Stopping AI audio due to speech detection.")
                 tts_controller.stop_immediately()
-                if ai_response_task and not ai_response_task.done():
-                    ai_response_task.cancel()
             return
 
         # Check if this is an aggregated transcript (contains previous parts)
@@ -628,58 +626,35 @@ async def handle_ai_turn(call_state: dict, lang: str, ws: WebSocket,
     # Build chat messages for new backend
     messages_for_chat = build_messages(history_for_prompt, lang_selected)
 
-    # ------------------------------------------------------------------
-    # Stream the LLM reply word-by-word, but we will PLAY 10-by-10 words.
-    # ------------------------------------------------------------------
-    log.info(f"[AI_TURN-{stream_sid}] Starting streaming reply from LLM…")
-
-    CHUNK_WORD_COUNT = 15  # number of words per TTS chunk
-    word_buffer: List[str] = []  # collect words until CHUNK_WORD_COUNT
-    full_words: List[str] = []   # accumulate the entire reply so we can run the decision prompt later
-
-    # If at any point the user interrupts, we will stop speaking further but
-    # still continue to read the rest of the stream silently so that we have
-    # the full reply for routing/ending decisions.
-    all_spoken_successfully = True
-
+    # --------------------------------------------------------------
+    # Fetch the full assistant reply in one request (no streaming)
+    # --------------------------------------------------------------
     try:
-        async for word in make_openai_request_stream(
+        ai_response_text = await make_openai_request(
+            api_key_manager=None,
             model="qwen2.5:72b",
             messages=messages_for_chat,
+            max_tokens=512,
             temperature=0.3,
             top_p=0.95,
-            chunk_size_words=1,
-        ):
-            if call_state["stop_call"]:
-                break  # Stop processing if call ended
-
-            full_words.append(word)
-            word_buffer.append(word)
-
-            # When buffer reaches CHUNK_WORD_COUNT words, speak them.
-            if len(word_buffer) >= CHUNK_WORD_COUNT:
-                chunk_text = " ".join(word_buffer)
-                word_buffer.clear()
-                if not await speak_chunk(chunk_text):
-                    all_spoken_successfully = False
-            # Note: speak_chunk internally stops if user is speaking.
-
-        # Flush any remaining words
-        if word_buffer and not call_state["stop_call"] and not call_state.get("user_is_speaking"):
-            chunk_text = " ".join(word_buffer)
-            if not await speak_chunk(chunk_text):
-                all_spoken_successfully = False
-
-    except asyncio.CancelledError:
-        log.warning(f"[AI_TURN-{stream_sid}] Streaming generation was cancelled.")
-        tts_controller.is_speaking = False
-        return
+        ) or ""
     except Exception as exc:
-        log.error(f"[AI_TURN-{stream_sid}] Error while streaming AI reply: {exc}", exc_info=True)
-        all_spoken_successfully = False
+        log.error(f"[AI_TURN-{stream_sid}] Error while generating AI reply: {exc}", exc_info=True)
+        ai_response_text = ""
 
-    # Finished streaming → assemble full text
-    ai_response_text = " ".join(full_words).strip()
+    all_spoken_successfully = True
+
+    # --------------------------------------------------------------
+    # Speak the reply in CHUNK_WORD_COUNT-word chunks
+    # --------------------------------------------------------------
+    CHUNK_WORD_COUNT = 15
+    words = ai_response_text.split()
+    for i in range(0, len(words), CHUNK_WORD_COUNT):
+        if call_state["stop_call"]:
+            break
+        chunk_text = " ".join(words[i : i + CHUNK_WORD_COUNT])
+        if not await speak_chunk(chunk_text):
+            all_spoken_successfully = False
 
     # Append reply to history (AFTER we know it)
     if ai_response_text:

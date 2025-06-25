@@ -66,6 +66,11 @@ async def make_openai_request(
                     return str(data["response"]).strip()
                 if "text" in data:
                     return str(data["text"]).strip()
+                # Top-level message object (e.g. {"message": {"role":"assistant","content":"…"}})
+                if "message" in data and isinstance(data["message"], dict):
+                    content = data["message"].get("content")
+                    if content:
+                        return str(content).strip()
             logger.warning("make_openai_request: Could not find assistant content in response JSON: %s", data)
             return ""
 

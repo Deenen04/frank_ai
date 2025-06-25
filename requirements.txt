@@ -1,0 +1,16 @@
+fastapi
+uvicorn[standard]
+gunicorn
+neo4j
+openai
+faiss-cpu
+numpy
+pydantic
+aiohttp
+httpx
+redis
+aioredis
+cryptography
+boto3
+supabase
+langid

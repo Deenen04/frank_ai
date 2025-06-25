@@ -70,7 +70,7 @@ async def generate_reply(payload: Dict[str, Any]) -> Dict[str, Any]:
     )
     raw_text = raw_text or ""
 
-    class_prompt = safe_format(DECISION_PROMPT, ai_reply=raw_text)
+    class_prompt = DECISION_PROMPT.replace("{ai_reply}", raw_text)
     decision_raw = await make_openai_request(
         api_key_manager=None,
         model="qwen2.5:72b",

@@ -45,7 +45,7 @@ class DeepgramStreamer:
         # --- Local amplitude-based VAD parameters ---
         use_amplitude_vad: bool = True,
         amplitude_threshold_db: float = -10.0,  # Much more sensitive threshold for speech detection
-        silence_timeout: float = 2,  # Increased timeout for better speech end detection
+        silence_timeout: float = 0.6,  # Faster speech-end detection
     ):
         self.api_key = api_key
         self.encoding = encoding
@@ -75,7 +75,7 @@ class DeepgramStreamer:
         self._last_transcript_time: Optional[float] = None
         self._speech_end_detected = False
         self._speech_end_timer_task: Optional[asyncio.Task] = None
-        self._deepgram_response_timeout = 0.5  # Wait 3 seconds after speech end for Deepgram response
+        self._deepgram_response_timeout = 0.0  # Do not wait; we'll still handle late utterances via on_utterance
 
         log.info(f"[VAD-INIT] Amplitude threshold: {amplitude_threshold_db} dB -> linear: {self._amp_threshold_linear:.2f}")
         log.info(f"[VAD-INIT] Silence timeout: {silence_timeout}s, Encoding: {encoding}")
@@ -228,9 +228,10 @@ class DeepgramStreamer:
                             # Reset for next speech event
                             self._reset_transcript_accumulation()
                         else:
-                            # No transcript yet, wait for Deepgram
-                            log.info(f"[VAD] No transcript yet. Waiting {self._deepgram_response_timeout}s for Deepgram...")
-                            self._speech_end_timer_task = asyncio.create_task(self._delayed_speech_end_handler())
+                            # No transcript yet. If _deepgram_response_timeout > 0 we wait, otherwise rely on later on_utterance.
+                            if self._deepgram_response_timeout > 0:
+                                log.info(f"[VAD] No transcript yet. Waiting {self._deepgram_response_timeout}s for Deepgram...")
+                                self._speech_end_timer_task = asyncio.create_task(self._delayed_speech_end_handler())
                         
                         # Still trigger immediate speech end callback for interruption purposes
                         cb = self._callbacks.get('on_speech_end')

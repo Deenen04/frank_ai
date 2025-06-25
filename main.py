@@ -20,8 +20,7 @@ from deepgram_test import DeepgramStreamer
 from elevenlabs.client import ElevenLabs
 # Streaming generation helper
 from apiChatCompletion import make_openai_request
-# We still need safe_format and prompt templates for decision making
-from ai_executor import safe_format
+# Decision prompt template is imported below; we build it with simple replace.
 # Import language‐specific prompt templates
 from ai_prompt import (
     UNIFIED_CONVERSATION_AGENT,
@@ -481,7 +480,8 @@ async def media_websocket_endpoint(ws: WebSocket): # Renamed `media`
 
             elif event_type == "mark":
                 mark_name = message.get("mark", {}).get("name")
-                log.info(f"[WS-MARK] Received mark: {mark_name} for SID {message['streamSid']}")
+                sid_logged = message.get("streamSid") or call_state.get("twilio_stream_sid", "?")
+                log.info(f"[WS-MARK] Received mark: {mark_name} for SID {sid_logged}")
                 if mark_name == "end_of_ai_turn":
                     # This confirms AI has finished speaking its part.
                     # Useful if you need to take action after AI speaks.
@@ -490,7 +490,9 @@ async def media_websocket_endpoint(ws: WebSocket): # Renamed `media`
 
 
             elif event_type == "stop":
-                log.info(f"[WS-STOP] Received stop event from Twilio for SID {message['stop']['streamSid']}. Call is ending.")
+                stop_obj = message.get("stop", {}) if isinstance(message, dict) else {}
+                sid_logged = stop_obj.get("streamSid") or message.get("streamSid") or call_state.get("twilio_stream_sid", "?")
+                log.info(f"[WS-STOP] Received stop event from Twilio for SID {sid_logged}. Call is ending.")
                 call_state["stop_call"] = True
                 break # Exit main loop
             
@@ -670,7 +672,7 @@ async def handle_ai_turn(call_state: dict, lang: str, ws: WebSocket,
     # ------------------------------------------------------------------
     conversation_status = "continue"
     try:
-        decision_prompt = safe_format(DECISION_PROMPT, ai_reply=ai_response_text)
+        decision_prompt = DECISION_PROMPT.replace("{ai_reply}", ai_response_text)
         decision_raw = await make_openai_request(
             api_key_manager=None,
             model="qwen2.5:72b",

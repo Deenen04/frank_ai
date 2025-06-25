@@ -272,7 +272,7 @@ async def media_websocket_endpoint(ws: WebSocket): # Renamed `media`
         interim_results=False,
         vad_events=True,  # Keep VAD for fallback even though endpointing is used
         punctuate=True,
-        ='nova-3',  # Use nova-3 as requested
+        model ='nova-3',  # Use nova-3 as requested
         language=current_language, # Start with default, can be changed
         # Enhanced amplitude-based VAD parameters
         use_amplitude_vad=True,

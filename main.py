@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 from starlette.websockets import WebSocketState # Import for checking WebSocket state
 
 
-from deepgram_test import DeepgramStreamer
+from whisper_streamer import WhisperStreamer as DeepgramStreamer
 from elevenlabs.client import ElevenLabs
 # Streaming generation helper
 from apiChatCompletion import make_openai_request
@@ -61,14 +61,10 @@ def route_call(call_sid):
 
 load_dotenv()
 HOSTNAME = os.getenv("HOSTNAME_twilio", "localhost:8000") # Ensure port if uvicorn runs on non-80
-DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_API_KEY")
+DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_API_KEY")  # optional now – kept for backwards compat
 ELEVEN_API_KEY = os.getenv("ELEVEN_API_KEY")
 
-if not DEEPGRAM_API_KEY:
-    raise ValueError("DEEPGRAM_API_KEY not set in environment or .env file")
-if not ELEVEN_API_KEY:
-    raise ValueError("ELEVEN_API_KEY not set in environment or .env file")
-
+# Local Whisper no longer needs the Deepgram key – do not error if missing.
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)-7s | %(name)s | %(message)s")
 log = logging.getLogger("voicebot")
@@ -272,7 +268,7 @@ async def media_websocket_endpoint(ws: WebSocket): # Renamed `media`
         interim_results=False,
         vad_events=True,  # Keep VAD for fallback even though endpointing is used
         punctuate=True,
-        model ='nova-3',  # Use nova-3 as requested
+        model='nova-3',  # Use nova-3 as requested
         language=current_language, # Start with default, can be changed
         # Enhanced amplitude-based VAD parameters
         use_amplitude_vad=True,
@@ -634,7 +630,7 @@ async def handle_ai_turn(call_state: dict, lang: str, ws: WebSocket,
     try:
         ai_response_text = await make_openai_request(
             api_key_manager=None,
-            model="vanilj/smaug-llama-3-70b-instruct:Q2_K",
+            model="qwen2.5:72b",
             messages=messages_for_chat,
             max_tokens=512,
             temperature=0.3,
@@ -675,7 +671,7 @@ async def handle_ai_turn(call_state: dict, lang: str, ws: WebSocket,
         decision_prompt = DECISION_PROMPT.replace("{ai_reply}", ai_response_text)
         decision_raw = await make_openai_request(
             api_key_manager=None,
-            model="vanilj/smaug-llama-3-70b-instruct:Q2_K",
+            model="qwen2.5:72b",
             messages=[{"role": "user", "content": decision_prompt}],
             max_tokens=1,
             temperature=0.0,

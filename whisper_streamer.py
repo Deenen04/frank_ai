@@ -1,0 +1,299 @@
+import asyncio
+import logging
+import time
+import audioop
+from typing import Optional, List
+
+import numpy as np
+
+try:
+    from faster_whisper import WhisperModel
+except ImportError:  # graceful fallback so the whole project can still import even if dep missing
+    WhisperModel = None  # type: ignore
+
+__all__ = ["WhisperStreamer"]
+
+log = logging.getLogger("deepgram_streamer")  # keep original logger name for compatibility
+
+
+class WhisperStreamer:  # pylint: disable=too-many-instance-attributes
+    """A drop-in replacement for *DeepgramStreamer* that performs *local* real-time
+    transcription using *Faster-Whisper*.
+
+    Only μ-law @ 8 kHz audio is accepted (as emitted by Twilio).  The audio is
+    converted to 16-bit PCM and up-sampled to 16 kHz before being fed into the
+    Whisper model.  The public callback signatures are identical to the original
+    Deepgram implementation so existing application code does **not** have to
+    change.
+    """
+
+    # ---------------------------------------------------------------------
+    # Construction / configuration
+    # ---------------------------------------------------------------------
+
+    def __init__(
+        self,
+        api_key: str | None = None,  # ignored, kept for signature compatibility
+        *,
+        encoding: str = "mulaw",
+        sample_rate: int = 8000,
+        interim_results: bool = False,  # not implemented – kept for compat
+        vad_events: bool = True,
+        punctuate: bool = True,  # whisper already outputs punctuation
+        model: str = "small",  # whisper model size to load ("tiny", "base", "small", "medium", "large")
+        language: str = "multi",
+        use_amplitude_vad: bool = True,
+        amplitude_threshold_db: float = -5.0,
+        silence_timeout: float = 1.2,
+    ):
+        # --- public config ------------------------------------------------
+        self.encoding = encoding.lower()
+        self.sample_rate_in = sample_rate
+        self.language = language.lower() if language else "multi"
+        self._use_amp_vad = use_amplitude_vad
+        self._silence_timeout = silence_timeout
+        self._punctuate = punctuate
+        self._interim_results = interim_results
+        self._model_name = model
+        if self._model_name not in {"tiny", "base", "small", "medium", "large", "large-v2", "large-v3"}:
+            log.warning("[Whisper] Unknown model '%s'. Falling back to 'small'.", self._model_name)
+            self._model_name = "small"
+        self._model: Optional[WhisperModel] = None
+
+        # --- amplitude VAD ------------------------------------------------
+        if self.encoding in {"mulaw", "ulaw"}:
+            # For μ-law we work directly with RMS of converted PCM samples.
+            # The mapping below is empirical: –5 dB → ≈700 RMS for 16-bit.
+            self._amp_threshold_linear = 32768 * (10 ** (amplitude_threshold_db / 20.0))
+        else:
+            # Assume linear PCM in 16-bit
+            self._amp_threshold_linear = 32768 * (10 ** (amplitude_threshold_db / 20.0))
+
+        self._last_voice_ts: Optional[float] = None
+        self._speaking = False
+        self._speech_end_detected = False
+
+        # Buffer that stores 16 kHz PCM bytes belonging to the *current* speech
+        # segment.
+        self._speech_buffer: bytearray = bytearray()
+
+        # State for audioop.ratecv (for seamless resampling)
+        self._ratecv_state = None
+
+        # Async helpers ----------------------------------------------------
+        self._loop = asyncio.get_event_loop()
+        self._close_evt = asyncio.Event()
+        self._speech_end_timer_task: Optional[asyncio.Task] = None
+
+        # callbacks: identical keys to the Deepgram version
+        self._callbacks = {
+            "on_speech_start": None,
+            "on_transcript": None,
+            "on_speech_end": None,
+            "on_utterance": None,
+        }
+
+        log.info(
+            "[Whisper-INIT] Using faster-whisper model '%s', amp-threshold %.1f dB (→ %.0f), silence %.1fs",
+            self._model_name,
+            amplitude_threshold_db,
+            self._amp_threshold_linear,
+            silence_timeout,
+        )
+
+    # ------------------------------------------------------------------
+    # Public helpers (unchanged API)
+    # ------------------------------------------------------------------
+
+    def on(self, event: str, callback):
+        if event not in self._callbacks:
+            raise ValueError(f"Unknown event '{event}'")
+        self._callbacks[event] = callback
+
+    def set_vad_threshold(self, amplitude_threshold_db: float):
+        self._amp_threshold_linear = 32768 * (10 ** (amplitude_threshold_db / 20.0))
+        log.info("[VAD-ADJUST] New threshold: %.1f dB → %.0f", amplitude_threshold_db, self._amp_threshold_linear)
+
+    def set_rms_threshold(self, rms_threshold: float):
+        self._amp_threshold_linear = rms_threshold
+        log.info("[VAD-ADJUST] New RMS threshold: %.0f", self._amp_threshold_linear)
+
+    # ------------------------------------------------------------------
+    # Life-cycle helpers — kept to preserve external call sites
+    # ------------------------------------------------------------------
+
+    async def connect(self):
+        """Instantiate Whisper on the first call. No network connections."""
+        if WhisperModel is None:
+            raise RuntimeError(
+                "faster-whisper not installed. Add `faster-whisper` to requirements.txt and pip-install it."
+            )
+        if self._model is None:
+            device = "cuda" if torch_available_and_gpu() else "cpu"
+            compute_type = "float16" if device == "cuda" else "int8"
+            self._model = WhisperModel(self._model_name, device=device, compute_type=compute_type)
+            log.info("[Whisper] Model loaded on %s (compute=%s)", device, compute_type)
+
+    def is_open(self) -> bool:
+        return not self._close_evt.is_set()
+
+    async def finish(self):
+        if not self._close_evt.is_set():
+            self._close_evt.set()
+        # Nothing to close for local inference.
+
+    # ------------------------------------------------------------------
+    # Audio ingestion ---------------------------------------------------
+    # ------------------------------------------------------------------
+
+    async def send(self, audio_chunk: bytes):
+        """Receive μ-law data from Twilio and feed it into the VAD / ASR stack."""
+
+        # 1) μ-law → 16-bit PCM -----------------------------------------
+        try:
+            pcm16 = audioop.ulaw2lin(audio_chunk, 2)
+        except audioop.error as e:  # pragma: no cover — rare encode errors
+            log.debug("audioop.ulaw2lin failed: %s", e)
+            return
+
+        # 2) Up-sample 8 kHz → 16 kHz so Whisper is happy
+        try:
+            pcm16_16k, self._ratecv_state = audioop.ratecv(
+                pcm16,
+                2,  # width in bytes
+                1,  # mono
+                8000,
+                16000,
+                self._ratecv_state,
+            )
+        except audioop.error as e:
+            log.debug("audioop.ratecv failed: %s", e)
+            return
+
+        # 3) Amplitude VAD ---------------------------------------------
+        if self._use_amp_vad:
+            rms = audioop.rms(pcm16, 2)
+            now_ts = time.time()
+
+            # rms debugging each 2 s
+            if not hasattr(self, "_last_rms_log_ts") or now_ts - self._last_rms_log_ts > 2.0:
+                log.debug("[VAD] rms %.0f (thr %.0f) speaking=%s", rms, self._amp_threshold_linear, self._speaking)
+                self._last_rms_log_ts = now_ts
+
+            if rms > self._amp_threshold_linear:
+                # voice *present*
+                self._last_voice_ts = now_ts
+                if not self._speaking:
+                    self._trigger_speech_start()
+                self._speech_buffer.extend(pcm16_16k)
+            else:
+                # below threshold
+                if self._speaking and self._last_voice_ts and (now_ts - self._last_voice_ts) >= self._silence_timeout:
+                    # speech ended
+                    self._trigger_speech_end()
+                elif self._speaking:
+                    # still speaking — append audio so current segment contains little trailing silence
+                    self._speech_buffer.extend(pcm16_16k)
+        else:
+            # VAD disabled → treat everything as speech
+            self._speech_buffer.extend(pcm16_16k)
+
+    # ------------------------------------------------------------------
+    # Internal helpers --------------------------------------------------
+    # ------------------------------------------------------------------
+
+    def _trigger_speech_start(self):
+        self._speaking = True
+        self._speech_end_detected = False
+        self._speech_buffer = bytearray()  # reset buffer for new segment
+        cb = self._callbacks.get("on_speech_start")
+        if cb:
+            try:
+                cb()
+            except Exception as e:  # pragma: no cover
+                log.error("on_speech_start callback error: %s", e)
+
+    def _trigger_speech_end(self):
+        self._speaking = False
+        self._speech_end_detected = True
+        cb_end = self._callbacks.get("on_speech_end")
+        if cb_end:
+            try:
+                cb_end()
+            except Exception as e:  # pragma: no cover
+                log.error("on_speech_end callback error: %s", e)
+
+        # fire asynchronous transcription task
+        if self._speech_buffer:
+            # copy bytes so modifications to buffer don't affect task
+            segment = bytes(self._speech_buffer)
+            self._speech_buffer = bytearray()  # reset for next segment
+            self._loop.create_task(self._transcribe_and_callback(segment))
+
+    async def _transcribe_and_callback(self, pcm16k_bytes: bytes):
+        """Run Whisper on *pcm16k_bytes* and invoke transcript callbacks."""
+        if self._model is None:
+            # model was not loaded (connect() not awaited?) — best effort load now
+            await self.connect()
+
+        # convert bytes → numpy float32  (Whisper expects float32 in  range)
+        audio_int16 = np.frombuffer(pcm16k_bytes, dtype=np.int16)
+        audio_float32 = audio_int16.astype("float32") / 32768.0
+
+        try:
+            segments, _info = self._model.transcribe(
+                audio_float32,
+                language=None if self.language == "multi" else self.language,
+                beam_size=5,
+                word_timestamps=False,
+            )
+            text_parts: List[str] = [seg.text.strip() for seg in segments]
+            transcript = " ".join(text_parts).strip()
+        except Exception as e:  # pragma: no cover
+            log.error("Whisper transcription failed: %s", e, exc_info=True)
+            transcript = ""
+
+        if transcript:
+            # on_transcript (final=True) -------------------------------------------------
+            cb_tr = self._callbacks.get("on_transcript")
+            if cb_tr:
+                try:
+                    cb_tr(transcript, True)
+                except Exception as e:
+                    log.error("on_transcript callback error: %s", e)
+
+            # on_utterance --------------------------------------------------------------
+            cb_utt = self._callbacks.get("on_utterance")
+            if cb_utt:
+                try:
+                    cb_utt(transcript)
+                except Exception as e:
+                    log.error("on_utterance callback error: %s", e)
+
+    # ------------------------------------------------------------------
+    # Misc helpers ------------------------------------------------------
+    # ------------------------------------------------------------------
+
+    def get_vad_stats(self) -> dict:
+        return {
+            "is_speaking": self._speaking,
+            "threshold_linear": self._amp_threshold_linear,
+            "last_voice_timestamp": self._last_voice_ts,
+            "silence_timeout": self._silence_timeout,
+            "use_amplitude_vad": self._use_amp_vad,
+            "speech_end_detected": self._speech_end_detected,
+        }
+
+
+# -----------------------------------------------------------------------
+# small utility ----------------------------------------------------------
+# -----------------------------------------------------------------------
+
+def torch_available_and_gpu() -> bool:
+    """Return *True* if *torch* is importable **and** a CUDA device is available."""
+    try:
+        import torch  # pylint: disable=import-error
+
+        return torch.cuda.is_available()
+    except Exception:  # pragma: no cover
+        return False 

@@ -634,7 +634,7 @@ async def handle_ai_turn(call_state: dict, lang: str, ws: WebSocket,
     try:
         ai_response_text = await make_openai_request(
             api_key_manager=None,
-            model="qwen2.5:72b",
+            model="qwen2.5:latest",
             messages=messages_for_chat,
             max_tokens=512,
             temperature=0.3,
@@ -675,7 +675,7 @@ async def handle_ai_turn(call_state: dict, lang: str, ws: WebSocket,
         decision_prompt = DECISION_PROMPT.replace("{ai_reply}", ai_response_text)
         decision_raw = await make_openai_request(
             api_key_manager=None,
-            model="qwen2.5:72b",
+            model="qwen2.5:latest",
             messages=[{"role": "user", "content": decision_prompt}],
             max_tokens=1,
             temperature=0.0,

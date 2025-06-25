@@ -62,18 +62,9 @@ class WhisperStreamer:  # pylint: disable=too-many-instance-attributes
 
         # --- amplitude VAD ------------------------------------------------
         if self.encoding in {"mulaw", "ulaw"}:
-            # μ-law RMS values are much lower than 16-bit linear PCM.
-            # Use the same heuristic mapping that proved reliable in the previous
-            # Deepgram implementation.
-            if amplitude_threshold_db <= -10:
-                self._amp_threshold_linear = 1000.0
-            elif amplitude_threshold_db <= -5:
-                self._amp_threshold_linear = 500.0
-            elif amplitude_threshold_db <= 0:
-                self._amp_threshold_linear = 200.0
-            else:
-                # treat positive values as a direct RMS threshold
-                self._amp_threshold_linear = float(amplitude_threshold_db)
+            # The user requested a *fixed* minimum RMS of 1000 for μ-law.
+            # Anything below that is treated as silence / noise.
+            self._amp_threshold_linear = 1000.0
         else:
             # Linear PCM: convert dB value to linear scale.
             self._amp_threshold_linear = 32768 * (10 ** (amplitude_threshold_db / 20.0))

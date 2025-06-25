@@ -73,7 +73,7 @@ log = logging.getLogger("voicebot")
 deepgram_log = logging.getLogger("deepgram_streamer")
 deepgram_log.setLevel(logging.DEBUG)
 
-VOICE_IDS = {"en": "kdnRe2koJdOK4Ovxn2DI ", "fr": "ZQFCSsF1tIcjtMZJ6VCA", "de": "v3V1d2rk6528UrLKRuy8"}
+VOICE_IDS = {"en": "kdnRe2koJdOK4Ovxn2DI", "fr": "ZQFCSsF1tIcjtMZJ6VCA", "de": "v3V1d2rk6528UrLKRuy8"}
 FAREWELL_LINES = {"en": "Thanks for calling. Goodbye.", "fr": "Merci d'avoir appelé. Au revoir.", "de": "Danke für Ihren Anruf. Auf Wiedersehen."}
 GREETING_LINES = {"en": "Hi, This is Frank Babar Clinic, I am here to assist you book an appointment with us today. How can I help you?", "fr": "Bonjour, comment puis-je vous aider?", "de": "Hallo, wie kann ich Ihnen helfen?"}
 END_DELAY_SEC = 1 # Reduced for faster testing

@@ -257,7 +257,7 @@ async def media_websocket_endpoint(ws: WebSocket): # Renamed `media`
     }
     tts_controller = TTSController()
     # DeepgramStreamer now emits complete utterances, so we no longer need TranscriptSanitizer.
-    current_language = "de" # Default language
+    current_language = "multi" # Default language
     conversation_history: List[str] = []
     
     # Task management

@@ -45,15 +45,28 @@ async def make_openai_request(
             # Try standard OpenAI format first
             if isinstance(data, dict):
                 if "choices" in data and data["choices"]:
-                    try:
-                        return data["choices"][0]["message"]["content"].strip()
-                    except Exception:
-                        pass
+                    first_choice = data["choices"][0]
+                    # OpenAI completion format
+                    if "message" in first_choice and isinstance(first_choice["message"], dict):
+                        content = first_choice["message"].get("content")
+                        if content:
+                            return content.strip()
+                    # Some implementations put content directly on choice
+                    if first_choice.get("content"):
+                        return str(first_choice["content"]).strip()
+                    if first_choice.get("text"):
+                        return str(first_choice["text"]).strip()
+                    if "delta" in first_choice and isinstance(first_choice["delta"], dict):
+                        delta_content = first_choice["delta"].get("content")
+                        if delta_content:
+                            return delta_content.strip()
+
                 # Fallbacks used by other servers
                 if "response" in data:
                     return str(data["response"]).strip()
                 if "text" in data:
                     return str(data["text"]).strip()
+            logger.warning("make_openai_request: Could not find assistant content in response JSON: %s", data)
             return ""
 
     except Exception as e:
@@ -107,7 +120,7 @@ async def make_openai_request_stream(
     cumulative_text: str = ""  # track text already emitted to avoid duplicates when endpoint sends cumulative payloads
     last_word: Optional[str] = None  # track last emitted word to avoid duplicates
 
-    async def _yield_buffer(force: bool = False):
+    def _yield_buffer(force: bool = False):
         """Helper to yield *chunk_size_words* words at a time."""
         nonlocal buffer
         while len(buffer) >= chunk_size_words:

@@ -61,7 +61,7 @@ def route_call(call_sid):
 
 
 load_dotenv()
-HOSTNAME = os.getenv("HOSTNAME", "localhost:8000") # Ensure port if uvicorn runs on non-80
+HOSTNAME = os.getenv("HOSTNAME_twilio", "localhost:8000") # Ensure port if uvicorn runs on non-80
 DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_API_KEY")
 ELEVEN_API_KEY = os.getenv("ELEVEN_API_KEY")
 

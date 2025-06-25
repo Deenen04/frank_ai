@@ -88,7 +88,7 @@ DECISION_PROMPT = """You are a system that reads a receptionist AI's last messag
 - CONTINUE: otherwise, if the booking conversation should continue.
 
 Assistant reply:
-{{ai_reply}}
+{ai_reply}
 
 Output exactly one word: ROUTE, END, or CONTINUE.
 """

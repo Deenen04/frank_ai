@@ -41,7 +41,7 @@ class DeepgramStreamer:
         punctuate: bool = True,
         profanity_filter: bool = True,
         model: str = 'nova-3',  # Default to nova-3 as requested
-        language: str = 'multi',  # 'multi' enables all languages
+        language: str = 'de',  # 'multi' enables all languages
         # --- Local amplitude-based VAD parameters ---
         use_amplitude_vad: bool = True,
         amplitude_threshold_db: float = -10.0,  # Much more sensitive threshold for speech detection

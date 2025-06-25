@@ -1,49 +1,16 @@
-# ASGI Server
-uvicorn[standard]
-
-# FastAPI framework
 fastapi
-
-# WebSockets support
-websockets
-
-# Twilio for call handling
-twilio
-
-# Environment variable loading
-python-dotenv
-
-# Neo4j async driver
+uvicorn[standard]
+gunicorn
 neo4j
-
-# Redis client
-redis
-
-# HTTP client
-httpx
-
-# JSON validation
-pydantic
-
-# Audio processing
-sounddevice
+openai
+faiss-cpu
 numpy
-audioop  # built-in, no need to install
-
-# Language detection
+pydantic
+aiohttp
+httpx
+redis
+aioredis
+cryptography
+boto3
+supabase
 langid
-
-# Sentence embeddings
-sentence-transformers
-
-# ElevenLabs (assumed latest client for TTS)
-elevenlabs
-
-# Logging (already built-in, listed for clarity)
-logging  # standard lib
-
-# Optional if you use `requests` or streaming helpers
-requests
-
-# For compatibility and typing
-typing-extensions

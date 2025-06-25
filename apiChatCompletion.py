@@ -26,24 +26,35 @@ async def make_openai_request(
 ) -> Optional[str]:
     """Send prompt to hosted model instead of OpenAI."""
     try:
-        prompt = "\n".join(f"{m['role'].capitalize()}: {m['content']}" for m in messages)
+        # ------------------------------------------------------------------
+        # New backend expects OpenAI-style chat payload (see user spec)
+        # ------------------------------------------------------------------
         payload = {
-            "model": "phi4:14b",
-            "prompt": prompt,
+            "model": model,
             "stream": False,
-            "temperature": 0.1,
-            "top_p": 0.1,
-            "options": {
-                "num_predict": 200
-            }
+            "messages": messages,
+            "temperature": temperature,
+            "top_p": top_p,
         }
-        url = "https://expects-longitude-insights-sending.trycloudflare.com/api/generate"
+        url = "http://localhost:21434/api/chat"
 
         async with httpx.AsyncClient(timeout=CHAT_TIMEOUT) as client:
             response = await client.post(url, json=payload)
             response.raise_for_status()
             data = response.json()
-            return data.get("response", "").strip()
+            # Try standard OpenAI format first
+            if isinstance(data, dict):
+                if "choices" in data and data["choices"]:
+                    try:
+                        return data["choices"][0]["message"]["content"].strip()
+                    except Exception:
+                        pass
+                # Fallbacks used by other servers
+                if "response" in data:
+                    return str(data["response"]).strip()
+                if "text" in data:
+                    return str(data["text"]).strip()
+            return ""
 
     except Exception as e:
         logger.error("Hosted LLM request failed: %s", e)
@@ -82,21 +93,19 @@ async def make_openai_request_stream(
     non-streaming request and simply chunks the full response.
     """
 
-    prompt = "\n".join(f"{m['role'].capitalize()}: {m['content']}" for m in messages)
-
     payload = {
-        "model": "llama3.3:70b-instruct-q2_K",  # fixed for now – keep in sync
-        "prompt": prompt,
+        "model": model,
         "stream": True,
+        "messages": messages,
         "temperature": temperature,
         "top_p": top_p,
     }
 
-    url_stream = "http://localhost:21434/api/generate"
-   
+    url_stream = "http://localhost:21434/api/chat"
 
     buffer: List[str] = []  # buffer for chunks we will yield
     cumulative_text: str = ""  # track text already emitted to avoid duplicates when endpoint sends cumulative payloads
+    last_word: Optional[str] = None  # track last emitted word to avoid duplicates
 
     async def _yield_buffer(force: bool = False):
         """Helper to yield *chunk_size_words* words at a time."""
@@ -129,9 +138,11 @@ async def make_openai_request_stream(
                         data = json.loads(line)
                         # Common possibilities
                         content_part = (
-                            data.get("response")
+                            # OpenAI streaming delta format
+                            data.get("choices", [{}])[0].get("delta", {}).get("content")
+                            or data.get("choices", [{}])[0].get("message", {}).get("content")
+                            or data.get("response")
                             or data.get("text")
-                            or (data.get("choices", [{}])[0].get("delta", {}).get("content"))
                             or ""
                         )
                     except Exception:
@@ -149,8 +160,9 @@ async def make_openai_request_stream(
 
                     # Split into words and add to buffer
                     for w in new_part.split():
-                        if w:  # ignore empty strings from split
+                        if w and w != last_word:  # ignore empty strings and duplicates
                             buffer.append(w)
+                            last_word = w
                     # Yield any complete chunks available
                     for chunk in _yield_buffer():
                         yield chunk
@@ -176,7 +188,10 @@ async def make_openai_request_stream(
 
     # Yield in chunks of *chunk_size_words*
     for word in full_text.split():
+        if word == last_word:
+            continue
         buffer.append(word)
+        last_word = word
         if len(buffer) >= chunk_size_words:
             yield " ".join(buffer[:chunk_size_words])
             buffer = buffer[chunk_size_words:]

@@ -28,6 +28,7 @@ from ai_prompt import (
     UNIFIED_CONVERSATION_AGENT_FR,
     UNIFIED_CONVERSATION_AGENT_DE,
     DECISION_PROMPT,
+    build_messages,
 )
 # (generate_reply is kept for non-streaming fallbacks if needed)
 from ai_executor import generate_reply  # Import the real AI function (fallback)
@@ -256,7 +257,7 @@ async def media_websocket_endpoint(ws: WebSocket): # Renamed `media`
     }
     tts_controller = TTSController()
     # DeepgramStreamer now emits complete utterances, so we no longer need TranscriptSanitizer.
-    current_language = "multi" # Default language
+    current_language = "de" # Default language
     conversation_history: List[str] = []
     
     # Task management
@@ -624,15 +625,8 @@ async def handle_ai_turn(call_state: dict, lang: str, ws: WebSocket,
     history_for_prompt = conversation_history[-MAX_HISTORY_LINES:]
     full_conversation_text = "\n".join(history_for_prompt)
 
-    # Choose language-specific prompt template
-    if lang_selected == "fr":
-        template = UNIFIED_CONVERSATION_AGENT_FR
-    elif lang_selected == "de":
-        template = UNIFIED_CONVERSATION_AGENT_DE
-    else:
-        template = UNIFIED_CONVERSATION_AGENT
-
-    conv_prompt = safe_format(template, conversation_history=full_conversation_text)
+    # Build chat messages for new backend
+    messages_for_chat = build_messages(history_for_prompt, lang_selected)
 
     # ------------------------------------------------------------------
     # Stream the LLM reply word-by-word, but we will PLAY 10-by-10 words.
@@ -650,8 +644,8 @@ async def handle_ai_turn(call_state: dict, lang: str, ws: WebSocket,
 
     try:
         async for word in make_openai_request_stream(
-            model="gpt-4.1-nano",  # same model placeholder – server ignores for hosted endpoint
-            messages=[{"role": "user", "content": conv_prompt}],
+            model="qwen2.5:72b",
+            messages=messages_for_chat,
             temperature=0.3,
             top_p=0.95,
             chunk_size_words=1,
@@ -704,7 +698,7 @@ async def handle_ai_turn(call_state: dict, lang: str, ws: WebSocket,
         decision_prompt = safe_format(DECISION_PROMPT, ai_reply=ai_response_text)
         decision_raw = await make_openai_request(
             api_key_manager=None,
-            model="gpt-4.1-nano",
+            model="qwen2.5:72b",
             messages=[{"role": "user", "content": decision_prompt}],
             max_tokens=1,
             temperature=0.0,

@@ -10,7 +10,7 @@ from string import Formatter
 from typing import Any, Dict, List
 
 from apiChatCompletion import APIKeyManager, make_openai_request
-from ai_prompt import UNIFIED_CONVERSATION_AGENT, DECISION_PROMPT
+from ai_prompt import DECISION_PROMPT, build_messages
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -50,31 +50,30 @@ async def generate_reply(payload: Dict[str, Any]) -> Dict[str, Any]:
         logger.warning(f"History has {len(history)} lines, trimming to last {MAX_HISTORY_LINES}.")
         history = history[-MAX_HISTORY_LINES:]
 
-    # ✅ FIX: The `conversation_history` from main.py *already includes* the latest user turn.
-    # We no longer need to add it again here. This fixes the duplication bug.
-    full_conversation_text = "\n".join(history)
+    # Build messages list for the new /api/chat endpoint (default to English system prompt)
+    messages = build_messages(history, lang="en")
 
-    conv_prompt = safe_format(
-        UNIFIED_CONVERSATION_AGENT,
-        conversation_history=full_conversation_text,
-    )
-    
-    # ✅ DEBUG: Log the exact prompt being sent to the AI. This is crucial for debugging.
-    logger.info(f"--- Sending Prompt to AI ---\n{conv_prompt}\n--------------------------")
+    # ✅ DEBUG: Log the messages being sent to the AI.
+    logger.info("--- Sending Messages to AI ---")
+    for m in messages:
+        logger.info(f"{m['role']}: {m['content']}")
+    logger.info("------------------------------")
 
-    # --- OpenAI calls are unchanged ---
+    # Call hosted LLM
     raw_text = await make_openai_request(
-        api_key_manager=OPENAI_KEYS,
-        model=API_MODEL,
-        messages=[{"role": "user", "content": conv_prompt}],
-        max_tokens=256, temperature=0.3, top_p=0.95,
+        api_key_manager=None,
+        model="qwen2.5:72b",
+        messages=messages,
+        max_tokens=256,
+        temperature=0.3,
+        top_p=0.95,
     )
     raw_text = raw_text or ""
 
     class_prompt = safe_format(DECISION_PROMPT, ai_reply=raw_text)
     decision_raw = await make_openai_request(
-        api_key_manager=OPENAI_KEYS,
-        model=API_MODEL,
+        api_key_manager=None,
+        model="qwen2.5:72b",
         messages=[{"role": "user", "content": class_prompt}],
         max_tokens=1, temperature=0.0, top_p=1.0,
     ) or ""

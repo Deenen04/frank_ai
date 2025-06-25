@@ -74,7 +74,8 @@ keep the conversation in the same language as the user and keep it short and con
 
 Provide only response to the user, no comments before or after only user response thanks. Never give any other information BUT YOUR RESPONSE TO THE USER.
 
-if something didn"t make sense only reply with "I'm sorry, I didn't understand you. Can you please repeat?""""
+if something didn"t make sense only reply with "I'm sorry, I didn't understand you. Can you please repeat?"""
+
 
 UNIFIED_CONVERSATION_AGENT_FR = """Vous êtes une IA réceptionniste qui aide les appelants à prendre rendez-vous.
 Votre objectif principal est d'informer l'utilisateur que vous ne pouvez l'aider qu'à prendre rendez-vous pour « Mr Babar Clinic ».

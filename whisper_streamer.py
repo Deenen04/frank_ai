@@ -252,8 +252,20 @@ class WhisperStreamer:  # pylint: disable=too-many-instance-attributes
         if self.language == "multi":
             # Use model's language detection on the segment.
             try:
-                lang_probs, _ = self._model.detect_language(audio_float32)
-                whisper_language = max(lang_probs, key=lang_probs.get)
+                dl_ret = self._model.detect_language(audio_float32)
+                # faster-whisper may return either (lang, probs) or just probs
+                if isinstance(dl_ret, tuple):
+                    # (detected_lang, prob) OR (prob_dict, something)
+                    if isinstance(dl_ret[0], str):
+                        whisper_language = dl_ret[0]
+                    elif isinstance(dl_ret[0], dict):
+                        whisper_language = max(dl_ret[0], key=dl_ret[0].get)
+                    else:
+                        whisper_language = None
+                elif isinstance(dl_ret, dict):
+                    whisper_language = max(dl_ret, key=dl_ret.get)
+                else:
+                    whisper_language = None
             except Exception as e:  # pragma: no cover
                 log.error("Language detection failed: %s", e)
                 whisper_language = None

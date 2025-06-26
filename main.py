@@ -379,9 +379,33 @@ async def media_websocket_endpoint(ws: WebSocket): # Renamed `media`
         call_state["user_is_speaking"] = False
         log.info("[DG] Speech end detected.")
 
-    def on_dg_utterance(utterance: str):
+    MIN_WHISPER_CONFIDENCE = 80.0  # percent – only process utterances above this threshold
+    
+    def on_dg_utterance(*args):
+        """Handle complete utterances emitted by the ASR stack.
+
+        The *WhisperStreamer* now forwards a *confidence* score (0-100) as the
+        second positional argument.  For backwards-compatibility we accept both
+        the original 1-argument as well as the new 2-argument signature.
+        """
         if call_state["stop_call"]:
             return
+
+        # Parse *args* → (utterance, confidence)
+        if len(args) == 1:
+            utterance = args[0]
+            confidence = 100.0  # assume perfect confidence when value missing (e.g. Deepgram backend)
+        else:
+            utterance, confidence = args[:2]
+
+        # Log confidence for debugging
+        log.info("[UTTERANCE] Confidence %.1f%% — '%s'", confidence, utterance)
+
+        # Discard low-confidence utterances
+        if confidence < MIN_WHISPER_CONFIDENCE:
+            log.warning("[UTTERANCE] Ignoring low-confidence transcript (%.1f%% < %.1f)", confidence, MIN_WHISPER_CONFIDENCE)
+            return
+
         # This is triggered by the enhanced VAD system:
         # 1. VAD detects speech end and sends transcript immediately (even if empty)
         # 2. If more transcript parts arrive later, they are aggregated and sent again

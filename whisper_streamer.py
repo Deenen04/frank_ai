@@ -278,12 +278,13 @@ class WhisperStreamer:  # pylint: disable=too-many-instance-attributes
             whisper_language = self.language
 
         try:
-            segments, _info = self._model.transcribe(
+            segments_iter, _info = self._model.transcribe(
                 audio_float32,
                 language=whisper_language,
                 beam_size=5,
                 word_timestamps=False,
             )
+            segments = list(segments_iter)  # materialise for repeated use
             text_parts: List[str] = [seg.text.strip() for seg in segments]
             transcript = " ".join(text_parts).strip()
         except Exception as e:  # pragma: no cover
@@ -291,6 +292,20 @@ class WhisperStreamer:  # pylint: disable=too-many-instance-attributes
             transcript = ""
 
         if transcript:
+            # --------------------------------------------------------------
+            # Compute a simple confidence metric for the utterance.
+            # --------------------------------------------------------------
+            try:
+                if segments:
+                    probs = [np.exp(s.avg_logprob) for s in segments if s.avg_logprob is not None]
+                    confidence = float(sum(probs) / len(probs)) * 100.0 if probs else 0.0
+                else:
+                    confidence = 0.0
+            except Exception as _:
+                confidence = 0.0
+
+            log.debug("[Whisper] Utterance confidence: %.1f%% — '%s'", confidence, transcript)
+
             # on_transcript (final=True) -------------------------------------------------
             cb_tr = self._callbacks.get("on_transcript")
             if cb_tr:
@@ -303,7 +318,8 @@ class WhisperStreamer:  # pylint: disable=too-many-instance-attributes
             cb_utt = self._callbacks.get("on_utterance")
             if cb_utt:
                 try:
-                    cb_utt(transcript)
+                    # Forward confidence as second positional argument (backward-compatible)
+                    cb_utt(transcript, confidence)
                 except Exception as e:
                     log.error("on_utterance callback error: %s", e)
 

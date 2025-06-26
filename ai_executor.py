@@ -10,7 +10,7 @@ from string import Formatter
 from typing import Any, Dict, List
 
 from apiChatCompletion import APIKeyManager, make_openai_request
-from ai_prompt import DECISION_PROMPT, build_prompt
+from ai_prompt import DECISION_PROMPT, build_messages
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 DEBUG_PROMPTS = True
-API_MODEL     = "gpt-4.1-nano"
+API_MODEL     = "llama3-70b-instruct"
 OPENAI_KEYS   = APIKeyManager.from_env("API_KEYS_THINKING_VERSION2")
 
 # ✅ NEW: Add a constant to control how many turns of history we send.
@@ -50,27 +50,34 @@ async def generate_reply(payload: Dict[str, Any]) -> Dict[str, Any]:
         logger.warning(f"History has {len(history)} lines, trimming to last {MAX_HISTORY_LINES}.")
         history = history[-MAX_HISTORY_LINES:]
 
-    # Build single prompt string for the hosted backend
-    prompt_str = build_prompt(history, lang="en")
+    # Build chat-style messages for the hosted backend
+    messages = build_messages(history, lang="en")
 
-    # ✅ DEBUG: Log prompt being sent to the AI.
-    logger.info("--- Prompt Sent to AI ---\n%s\n-------------------------", prompt_str)
+    # ✅ DEBUG: Log messages being sent to the AI.
+    if DEBUG_PROMPTS:
+        logger.info("--- Messages Sent to AI ---\n%s\n-------------------------", messages)
 
-    # Call hosted LLM
+    # Call hosted LLM using the new chat-completions format
     raw_text = await make_openai_request(
         api_key_manager=None,
-        model="openchat/openchat-3.5-1210",
-        prompt=prompt_str,
+        model=API_MODEL,
+        messages=messages,
         max_tokens=100,
         temperature=0.3,
         top_p=0.95,
     )
     raw_text = raw_text or ""
 
+    # ------------------------------------------------------------------
+    # Secondary call: classify ROUTE / END / CONTINUE.  We keep this as a
+    # *prompt* request for simplicity (small context).
+    # ------------------------------------------------------------------
+
     class_prompt = DECISION_PROMPT.replace("{ai_reply}", raw_text)
+
     decision_raw = await make_openai_request(
         api_key_manager=None,
-        model="openchat/openchat-3.5-1210",
+        model=API_MODEL,
         prompt=class_prompt,
         max_tokens=10,
         temperature=0.0,

@@ -14,7 +14,14 @@ logging.basicConfig(level=logging.INFO)
 # ----------------------------------------------------------------------
 
 LLM_API_BASE = os.getenv("LLM_API_BASE", "http://127.0.0.1:8000")
-CHAT_ENDPOINT = f"{LLM_API_BASE.rstrip('/')}/completion"
+
+# For *chat-style* requests (preferred) we target the OpenAI-compatible endpoint
+#     POST <base>/v1/chat/completions
+# For *raw-prompt* requests (legacy) we keep the old "/completion" path so
+# existing callers that rely on a single prompt string continue to work.
+
+CHAT_COMPLETION_ENDPOINT = f"{LLM_API_BASE.rstrip('/')}/v1/chat/completions"
+LEGACY_COMPLETION_ENDPOINT = f"{LLM_API_BASE.rstrip('/')}/completion"
 
 CHAT_TIMEOUT = 60  # seconds
 
@@ -78,24 +85,36 @@ async def make_openai_request(
     """
     try:
         # ------------------------------------------------------------------
-        # Flatten messages → prompt string required by backend
+        # Decide which endpoint & payload format to use
         # ------------------------------------------------------------------
-        if prompt is None:
-            if messages is None:
+
+        if messages is not None:
+            # Preferred *chat completions* style.
+            url = CHAT_COMPLETION_ENDPOINT
+            payload: Dict[str, Any] = {
+                "model": model,
+                "messages": messages,
+                "temperature": temperature,
+                "top_p": top_p,
+                "stream": False,
+            }
+        else:
+            # Legacy single-prompt style (fallback / internal use)
+            if prompt is None:
                 raise ValueError("make_openai_request: Either 'prompt' or 'messages' must be provided.")
-            prompt = _messages_to_prompt(messages)
 
-        # Build request payload per backend specification
-        payload: Dict[str, Any] = {
-            "prompt": prompt,
-            "n_predict": max_tokens,
-            "temperature": temperature,
-            "top_k": 40,        # Default recommended value
-            "top_p": top_p,
-            "stream": False,
-        }
+            # Some backends still expect a flat prompt – keep compatibility.
+            prompt = _messages_to_prompt(messages) if prompt is None else prompt
 
-        url = CHAT_ENDPOINT
+            payload = {
+                "prompt": prompt,
+                "n_predict": max_tokens,
+                "temperature": temperature,
+                "top_k": 40,
+                "top_p": top_p,
+                "stream": False,
+            }
+            url = LEGACY_COMPLETION_ENDPOINT
 
         async with httpx.AsyncClient(timeout=CHAT_TIMEOUT) as client:
             response = await client.post(url, json=payload)

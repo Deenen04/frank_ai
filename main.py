@@ -379,7 +379,7 @@ async def media_websocket_endpoint(ws: WebSocket): # Renamed `media`
         call_state["user_is_speaking"] = False
         log.info("[DG] Speech end detected.")
 
-    MIN_WHISPER_CONFIDENCE = 80.0  # percent – only process utterances above this threshold
+    MIN_WHISPER_CONFIDENCE = 55.0  # percent – only process utterances above this threshold
     
     def on_dg_utterance(*args):
         """Handle complete utterances emitted by the ASR stack.

@@ -578,7 +578,7 @@ async def handle_ai_turn(call_state: dict, lang: str, ws: WebSocket,
             tts_controller.current_generator = tts_client.text_to_speech.stream(
                 text=text_chunk,
                 voice_id=voice_id,
-                model_id="eleven_multilingual_v2",
+                model_id="eleven_turbo_v2_5",
                 output_format="ulaw_8000",
                 optimize_streaming_latency=0,
             )

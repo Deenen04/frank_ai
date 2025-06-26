@@ -37,7 +37,11 @@ You must:
 - If you don't understand the user, reply with: \"I'm sorry, I didn't understand you. Can you please repeat?\"
 - If the user refuses to book or says 'no', politely acknowledge and end the conversation.
 
-Your answers must always reflect the current step of the booking conversation logically."""
+Your answers must always reflect the current step of the booking conversation logically.
+
+IMPORTANT:
+- Do NOT prefix your response with \"AI:\" or any speaker label.
+- Reply with the content only, no additional notes or labels."""
 
 SYSTEM_PROMPT_FR = """Vous êtes une IA réceptionniste qui aide les appelants à prendre rendez-vous uniquement pour « Mr Babar Clinic ».
 
@@ -61,7 +65,11 @@ Vous devez :
 - Si vous ne comprenez pas, répondez : « Je suis désolé, je n'ai pas compris. Pouvez-vous répéter ? »
 - Si l'utilisateur refuse de réserver ou dit « non », reconnaissez poliment et terminez la conversation.
 
-Vos réponses doivent toujours refléter logiquement l'étape actuelle de la réservation."""
+Vos réponses doivent toujours refléter logiquement l'étape actuelle de la réservation.
+
+IMPORTANT :
+- Ne précédez pas votre réponse de \"AI:\" ni d'aucun label de locuteur.
+- Répondez uniquement avec le contenu, sans notes ni étiquettes."""
 
 SYSTEM_PROMPT_DE = """Sie sind eine Empfangs-KI, die Anrufern ausschließlich dabei hilft, Termine für \"Mr Babar Clinic\" zu buchen.
 
@@ -85,7 +93,11 @@ Sie müssen:
 - Wenn Sie den Nutzer nicht verstehen, antworten Sie: \"Entschuldigung, ich habe Sie nicht verstanden. Können Sie das bitte wiederholen?\"
 - Wenn der Nutzer die Buchung ablehnt oder \"nein\" sagt, bestätigen Sie dies höflich und beenden Sie das Gespräch.
 
-Ihre Antworten müssen stets logisch zum aktuellen Schritt der Buchung passen."""
+Ihre Antworten müssen stets logisch zum aktuellen Schritt der Buchung passen.
+
+WICHTIG:
+- Setzen Sie **keine** \"AI:\"- oder ähnliche Sprecher-Labels vor Ihre Antwort.
+- Antworten Sie ausschließlich mit dem Inhalt, ohne zusätzliche Hinweise oder Labels."""
 
 LANG_TO_SYSTEM_PROMPT = {
     "en": SYSTEM_PROMPT_EN,
@@ -145,7 +157,6 @@ def build_prompt(history_lines: List[str], lang: str = "en") -> str:
     # system instructions followed by the conversation history.
     prompt_parts: List[str] = [system_prompt, ""]
     prompt_parts.extend(history_lines)
-    # Ensure the assistant tag is last so the model continues correctly
-    if not history_lines or not history_lines[-1].startswith("AI:"):
-        prompt_parts.append("AI:")
+    # Final blank line so the model continues the conversation without needing a label
+    prompt_parts.append("")
     return "\n".join(prompt_parts)

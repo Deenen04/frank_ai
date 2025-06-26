@@ -19,6 +19,35 @@ CHAT_ENDPOINT = f"{LLM_API_BASE.rstrip('/')}/completion"
 CHAT_TIMEOUT = 60  # seconds
 
 # ----------------------------------------------------------------------
+# Helper: Convert chat-style messages to single prompt string expected by backend
+# ----------------------------------------------------------------------
+
+def _messages_to_prompt(messages: List[Dict[str, Any]]) -> str:
+    """Convert a list of {role, content} dicts to a single prompt string.
+
+    The backend expects one string beginning with ``<|begin_of_text|>`` and then
+    repeating ``<|role|>\n<content>`` for each message. Roles are mapped as:
+        * system     → <|system|>
+        * user       → <|user|>
+        * assistant  → <|assistant|>
+    Unknown roles default to ``<|user|>``.
+    """
+    role_map = {
+        "system": "<|system|>",
+        "user": "<|user|>",
+        "assistant": "<|assistant|>",
+    }
+    parts: List[str] = ["<|begin_of_text|>"]
+    for msg in messages:
+        role_tag = role_map.get(msg.get("role", "user"), "<|user|>")
+        parts.append(f"{role_tag}\n{msg.get('content', '')}")
+    # The backend will continue generation from the last assistant tag
+    # if the final message is from the user. Ensure we end with the tag.
+    if messages and messages[-1].get("role") != "assistant":
+        parts.append("<|assistant|>")
+    return "\n".join(parts)
+
+# ----------------------------------------------------------------------
 # make_openai_request – now points to your hosted LLM
 # ----------------------------------------------------------------------
 async def make_openai_request(
@@ -31,62 +60,70 @@ async def make_openai_request(
     top_p: float,
     response_format: Optional[Dict[str, str]] = None,
 ) -> Optional[str]:
-    """Send prompt to hosted model instead of OpenAI."""
+    """Send prompt to hosted model instead of OpenAI.
+
+    The hosted LLM expects a *single* prompt string, not the Chat Completions
+    format.  We therefore flatten the ``messages`` list into a prompt and send
+    the JSON body like this::
+
+        {
+            "prompt": "<|begin_of_text|><|system|>…",
+            "n_predict": 200,
+            "temperature": 0.7,
+            "top_k": 40,
+            "top_p": 0.9,
+            "stream": false
+        }
+    """
     try:
         # ------------------------------------------------------------------
-        # New backend expects OpenAI-style chat payload (see user spec)
+        # Flatten messages → prompt string required by backend
         # ------------------------------------------------------------------
-        payload = {
-            "model": model,
-            "stream": False,
-            "messages": messages,
-            "max_tokens": max_tokens,
+        prompt: str = _messages_to_prompt(messages)
+
+        # Build request payload per backend specification
+        payload: Dict[str, Any] = {
+            "prompt": prompt,
+            "n_predict": max_tokens,
             "temperature": temperature,
+            "top_k": 40,        # Default recommended value
             "top_p": top_p,
+            "stream": False,
         }
-        # Include response_format when specified (e.g. {"type": "json_object"})
-        if response_format is not None:
-            payload["response_format"] = response_format
+
         url = CHAT_ENDPOINT
 
         async with httpx.AsyncClient(timeout=CHAT_TIMEOUT) as client:
             response = await client.post(url, json=payload)
             response.raise_for_status()
             data = response.json()
-            # Try standard OpenAI format first
+            # Compatible parsing – try common response shapes
             if isinstance(data, dict):
-                if "choices" in data and data["choices"]:
-                    first_choice = data["choices"][0]
-                    # OpenAI completion format
-                    if "message" in first_choice and isinstance(first_choice["message"], dict):
-                        content = first_choice["message"].get("content")
-                        if content:
-                            return content.strip()
-                    # Some implementations put content directly on choice
-                    if first_choice.get("content"):
-                        return str(first_choice["content"]).strip()
-                    if first_choice.get("text"):
-                        return str(first_choice["text"]).strip()
-                    if "delta" in first_choice and isinstance(first_choice["delta"], dict):
-                        delta_content = first_choice["delta"].get("content")
-                        if delta_content:
-                            return delta_content.strip()
-
-                # Fallbacks used by other servers
-                if "response" in data:
+                # Many backends return {"content": "…"}
+                if data.get("content"):
+                    return str(data["content"]).strip()
+                # GPT4All style maybe {"response": "…"}
+                if data.get("response"):
                     return str(data["response"]).strip()
-                if "text" in data:
+                # OpenAI compatibility shim (some proxies still use it)
+                if "choices" in data and data["choices"]:
+                    choice0 = data["choices"][0]
+                    if isinstance(choice0, dict):
+                        for key in ("content", "text"):
+                            if key in choice0 and choice0[key]:
+                                return str(choice0[key]).strip()
+                        if choice0.get("message") and isinstance(choice0["message"], dict):
+                            m_content = choice0["message"].get("content")
+                            if m_content:
+                                return str(m_content).strip()
+                # Fallback top-level "text"
+                if data.get("text"):
                     return str(data["text"]).strip()
-                # Top-level message object (e.g. {"message": {"role":"assistant","content":"…"}})
-                if "message" in data and isinstance(data["message"], dict):
-                    content = data["message"].get("content")
-                    if content:
-                        return str(content).strip()
             logger.warning("make_openai_request: Could not find assistant content in response JSON: %s", data)
             return ""
 
     except Exception as e:
-        # More helpful debug information on failure
+        # Helpful debug information on failure
         if isinstance(e, httpx.HTTPStatusError):
             logger.error(
                 "Hosted LLM request failed: HTTP %s – %s", e.response.status_code, e.response.text
@@ -128,12 +165,15 @@ async def make_openai_request_stream(
     non-streaming request and simply chunks the full response.
     """
 
+    prompt: str = _messages_to_prompt(messages)
+
     payload = {
-        "model": model,
+        "prompt": prompt,
         "stream": True,
-        "messages": messages,
         "temperature": temperature,
+        "top_k": 40,
         "top_p": top_p,
+        "n_predict": 2048,
     }
 
     url_stream = CHAT_ENDPOINT
@@ -171,11 +211,9 @@ async def make_openai_request_stream(
                     # Extract the text content from whatever JSON schema we get.
                     try:
                         data = json.loads(line)
-                        # Common possibilities
+                        # Possible keys
                         content_part = (
-                            # OpenAI streaming delta format
-                            data.get("choices", [{}])[0].get("delta", {}).get("content")
-                            or data.get("choices", [{}])[0].get("message", {}).get("content")
+                            data.get("content")
                             or data.get("response")
                             or data.get("text")
                             or ""
@@ -188,7 +226,6 @@ async def make_openai_request_stream(
                     if content_part.startswith(cumulative_text):
                         new_part = content_part[len(cumulative_text):]
                     else:
-                        # Fallback – treat whole content as new (some endpoints send only delta)
                         new_part = content_part
 
                     cumulative_text = content_part

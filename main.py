@@ -23,9 +23,6 @@ from apiChatCompletion import make_openai_request
 # Decision prompt template is imported below; we build it with simple replace.
 # Import language‐specific prompt templates
 from ai_prompt import (
-    UNIFIED_CONVERSATION_AGENT,
-    UNIFIED_CONVERSATION_AGENT_FR,
-    UNIFIED_CONVERSATION_AGENT_DE,
     DECISION_PROMPT,
     build_messages,
 )

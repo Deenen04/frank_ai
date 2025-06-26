@@ -199,7 +199,7 @@ async def play_greeting(lang: str, sid: str, ws: WebSocket, tts_controller: TTSC
     log.info(f"[GREETING-{sid}] Playing: '{text}'")
     try:
         tts_controller.current_generator = tts_client.text_to_speech.stream(
-            text=text, voice_id=voice_id, model_id="eleven_turbo_v2_5", # eleven_flash_v2_5 is not a public model name. Use eleven_multilingual_v2 or eleven_turbo_v2
+            text=text, voice_id=voice_id, model_id="eleven_multilingual_v2", # eleven_flash_v2_5 is not a public model name. Use eleven_multilingual_v2 or eleven_turbo_v2
             output_format="ulaw_8000", optimize_streaming_latency=0
         )
         for audio_chunk_count, audio in enumerate(tts_controller.current_generator):
@@ -379,7 +379,7 @@ async def media_websocket_endpoint(ws: WebSocket): # Renamed `media`
             return
         log.debug("[DG] Speech start detected (waiting for transcript before taking action).")
 
-    MIN_TRANSCRIPT_CONFIDENCE = 35.0  # percent
+    MIN_TRANSCRIPT_CONFIDENCE = 50.0  # percent
 
     def on_dg_transcript(*args):
         """Handle interim transcripts (Deepgram or Whisper partials).
@@ -421,7 +421,7 @@ async def media_websocket_endpoint(ws: WebSocket): # Renamed `media`
         call_state["user_is_speaking"] = False
         log.info("[DG] Speech end detected.")
 
-    MIN_WHISPER_CONFIDENCE = 35.0  # percent – only process utterances above this threshold
+    MIN_WHISPER_CONFIDENCE = 50.0  # percent – only process utterances above this threshold
     
     def on_dg_utterance(*args):
         """Handle complete utterances emitted by the ASR stack.
@@ -644,7 +644,7 @@ async def handle_ai_turn(call_state: dict, lang: str, ws: WebSocket,
             tts_controller.current_generator = tts_client.text_to_speech.stream(
                 text=text_chunk,
                 voice_id=voice_id,
-                model_id="eleven_turbo_v2_5",
+                model_id="eleven_multilingual_v2",
                 output_format="ulaw_8000",
                 optimize_streaming_latency=0,
             )
@@ -680,7 +680,7 @@ async def handle_ai_turn(call_state: dict, lang: str, ws: WebSocket,
     # we will *stream* the answer instead of waiting for the entire text.
     # ------------------------------------------------------------------
 
-    MAX_HISTORY_LINES = 20  # Keep in sync with ai_executor
+    MAX_HISTORY_LINES = 10  # Keep in sync with ai_executor
     history_for_prompt = conversation_history[-MAX_HISTORY_LINES:]
 
     # Build single prompt for the backend

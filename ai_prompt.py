@@ -140,7 +140,10 @@ def build_prompt(history_lines: List[str], lang: str = "en") -> str:
     """
     system_prompt = get_system_prompt(lang)
 
-    prompt_parts: List[str] = ["<|begin_of_text|>", system_prompt, ""]
+    # We no longer prepend the special ``<|begin_of_text|>`` token. The
+    # backend model receives a plain prompt that starts directly with the
+    # system instructions followed by the conversation history.
+    prompt_parts: List[str] = [system_prompt, ""]
     prompt_parts.extend(history_lines)
     # Ensure the assistant tag is last so the model continues correctly
     if not history_lines or not history_lines[-1].startswith("AI:"):

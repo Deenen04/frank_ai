@@ -118,7 +118,33 @@ class TranscriptSanitizer:
 
 
 class TTSController:
-    def __init__(self): self.current_generator = None; self.is_speaking = False
+    def __init__(self):
+        # Active ElevenLabs generator instance (None when idle)
+        self.current_generator = None
+        # Whether the TTS engine is currently streaming audio to the client
+        self.is_speaking = False
+        # Accumulates plain-text chunks that have been **fully** spoken to the caller.
+        # This allows the application to know exactly what words were delivered even
+        # if the audio was interrupted mid-sentence.
+        self.spoken_text_parts: list[str] = []
+
+    # ------------------------------------------------------------------
+    # Utility helpers for spoken-text accounting
+    # ------------------------------------------------------------------
+
+    def reset_spoken_text(self):
+        """Clear the list of text chunks that were already streamed."""
+        self.spoken_text_parts.clear()
+
+    def add_spoken_text(self, text: str):
+        """Record a *text* chunk that has been sent completely to the caller."""
+        if text:
+            self.spoken_text_parts.append(text.strip())
+
+    def get_spoken_text(self) -> str:
+        """Return the concatenated text that has been spoken so far."""
+        return " ".join(self.spoken_text_parts).strip()
+
     def stop_immediately(self):
         if self.current_generator:
             log.debug("[TTS] Attempting to stop TTS generator.")
@@ -353,24 +379,40 @@ async def media_websocket_endpoint(ws: WebSocket): # Renamed `media`
             return
         log.debug("[DG] Speech start detected (waiting for transcript before taking action).")
 
-    def on_dg_transcript(transcript: str, is_final: bool):
-        """Hard stop TTS when any transcript is received from Deepgram."""
+    MIN_TRANSCRIPT_CONFIDENCE = 50.0  # percent
+
+    def on_dg_transcript(*args):
+        """Handle interim transcripts (Deepgram or Whisper partials).
+
+        Accepts both the 2-argument signature (*transcript*, *is_final*) used by
+        DeepgramStreamer **and** the 3-argument signature (*transcript*,
+        *is_final*, *confidence*) emitted by the enhanced WhisperStreamer.
+        """
         if call_state["stop_call"]:
             return
-            
-        # Immediately stop TTS when we receive ANY transcript from Deepgram
-        # This ensures we don't talk over the user
-        if transcript.strip():
-            # Mark that the caller is indeed speaking (confirmed by ASR text)
-            call_state["user_is_speaking"] = True
 
-        if tts_controller.is_speaking and transcript.strip():
-            log.info(f"[DG-TRANSCRIPT] Hard stopping TTS due to transcript: '{transcript}' (final: {is_final})")
+        # ------------------------------------------------------------------
+        # Parse *args* → transcript, is_final, confidence
+        # ------------------------------------------------------------------
+        transcript = args[0] if args else ""
+        is_final = args[1] if len(args) >= 2 else False
+        confidence = args[2] if len(args) >= 3 else 100.0  # Deepgram has no conf
+
+        if not transcript.strip():
+            return
+
+        # Mark that caller is speaking (confirmed by ASR text)
+        call_state["user_is_speaking"] = True
+
+        # Only interrupt TTS when the transcript meets the confidence threshold
+        if confidence >= MIN_TRANSCRIPT_CONFIDENCE and tts_controller.is_speaking:
+            log.info(
+                f"[DG-TRANSCRIPT] Stopping TTS – transcript='{transcript[:60]}…', final={is_final}, conf={confidence:.1f}%"
+            )
             tts_controller.stop_immediately()
-            
+
         # Display live transcript for debugging
-        if transcript.strip():
-            display_live_transcript(call_state["caller_phone_number"], transcript)
+        display_live_transcript(call_state["caller_phone_number"], transcript)
 
     def on_dg_speech_end():
         # Optional: this is already covered by on_utterance, but good for state tracking
@@ -379,7 +421,7 @@ async def media_websocket_endpoint(ws: WebSocket): # Renamed `media`
         call_state["user_is_speaking"] = False
         log.info("[DG] Speech end detected.")
 
-    MIN_WHISPER_CONFIDENCE = 55.0  # percent – only process utterances above this threshold
+    MIN_WHISPER_CONFIDENCE = 50.0  # percent – only process utterances above this threshold
     
     def on_dg_utterance(*args):
         """Handle complete utterances emitted by the ASR stack.
@@ -660,6 +702,9 @@ async def handle_ai_turn(call_state: dict, lang: str, ws: WebSocket,
         log.error(f"[AI_TURN-{stream_sid}] Error while generating AI reply: {exc}", exc_info=True)
         ai_response_text = ""
 
+    # Reset accounting for this AI turn
+    tts_controller.reset_spoken_text()
+
     all_spoken_successfully = True
 
     # --------------------------------------------------------------
@@ -672,16 +717,32 @@ async def handle_ai_turn(call_state: dict, lang: str, ws: WebSocket,
             break
         chunk_text = " ".join(words[i : i + CHUNK_WORD_COUNT])
         if not await speak_chunk(chunk_text):
+            # The chunk did not finish – mark overall turn as partial
             all_spoken_successfully = False
+        else:
+            # Entire chunk was played – remember it for later
+            tts_controller.add_spoken_text(chunk_text)
 
-    # Append reply to history (AFTER we know it)
-    if ai_response_text:
+    # ------------------------------------------------------------------
+    # Append **exactly what was spoken** to the conversation history so the
+    # agent remains aware of partial replies when it was interrupted.
+    # ------------------------------------------------------------------
+
+    spoken_text = tts_controller.get_spoken_text()
+
+    if spoken_text:
+        conversation_history.append(f"AI: {spoken_text}")
+    elif ai_response_text:
+        # Fallback — should only happen when the TTS engine failed before any
+        # audio could be delivered.
         conversation_history.append(f"AI: {ai_response_text}")
-        print(
-            f"[{call_state['caller_phone_number']}] HISTORY (now {len(conversation_history)} lines):\n"
-            f"{json.dumps(conversation_history, indent=2, ensure_ascii=False)}\n",
-            flush=True,
-        )
+
+    # Debug output of updated conversation history
+    print(
+        f"[{call_state['caller_phone_number']}] HISTORY (now {len(conversation_history)} lines):\n"
+        f"{json.dumps(conversation_history, indent=2, ensure_ascii=False)}\n",
+        flush=True,
+    )
 
     # ------------------------------------------------------------------
     # Decide ROUTE / END / CONTINUE using the full reply

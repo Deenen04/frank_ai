@@ -46,6 +46,7 @@ class WhisperStreamer:  # pylint: disable=too-many-instance-attributes
         use_amplitude_vad: bool = True,
         amplitude_threshold_db: float = -5.0,
         silence_timeout: float = 1.2,
+        partial_interval: float = 0.6,  # seconds between partial transcripts
     ):
         # --- public config ------------------------------------------------
         self.encoding = encoding.lower()
@@ -76,6 +77,13 @@ class WhisperStreamer:  # pylint: disable=too-many-instance-attributes
         # Buffer that stores 16 kHz PCM bytes belonging to the *current* speech
         # segment.
         self._speech_buffer: bytearray = bytearray()
+
+        # Timestamp of the last partial transcription – to throttle expensive
+        # Whisper inference calls.
+        self._last_partial_ts: float | None = None
+
+        # Minimum time between partial transcriptions (seconds)
+        self._partial_interval = max(0.3, partial_interval)
 
         # State for audioop.ratecv (for seamless resampling)
         self._ratecv_state = None
@@ -192,6 +200,21 @@ class WhisperStreamer:  # pylint: disable=too-many-instance-attributes
                 if not self._speaking:
                     self._trigger_speech_start()
                 self._speech_buffer.extend(pcm16_16k)
+
+                # ----------------------------------------------------------
+                # Emit *partial* transcription every self._partial_interval s
+                # ----------------------------------------------------------
+                if (
+                    self._interim_results  # user requested interim results
+                    and (self._last_partial_ts is None or now_ts - self._last_partial_ts >= self._partial_interval)
+                ):
+                    # Copy only the **last** 2.5 seconds of audio to keep latency
+                    # low and inference fast (2.5s * 16000 * 2 ≈ 80kB)
+                    max_samples = int(2.5 * 16000) * 2  # bytes
+                    pcm_tail = bytes(self._speech_buffer[-max_samples:]) if len(self._speech_buffer) > max_samples else bytes(self._speech_buffer)
+                    self._last_partial_ts = now_ts
+                    # Fire off background partial transcription
+                    self._loop.create_task(self._transcribe_and_callback(pcm_tail, is_final=False))
             else:
                 # below threshold
                 if self._speaking and self._last_voice_ts and (now_ts - self._last_voice_ts) >= self._silence_timeout:
@@ -236,8 +259,13 @@ class WhisperStreamer:  # pylint: disable=too-many-instance-attributes
             self._speech_buffer = bytearray()  # reset for next segment
             self._loop.create_task(self._transcribe_and_callback(segment))
 
-    async def _transcribe_and_callback(self, pcm16k_bytes: bytes):
-        """Run Whisper on *pcm16k_bytes* and invoke transcript callbacks."""
+    async def _transcribe_and_callback(self, pcm16k_bytes: bytes, *, is_final: bool = True):
+        """Run Whisper on *pcm16k_bytes* and invoke transcript callbacks.
+
+        If *is_final* is False, the result is treated as an *interim* (partial)
+        transcript.  Callbacks receive this via **on_transcript** so that the
+        main application can interrupt TTS early when confidence ≥ threshold.
+        """
         if self._model is None:
             # model was not loaded (connect() not awaited?) — best effort load now
             await self.connect()
@@ -306,17 +334,22 @@ class WhisperStreamer:  # pylint: disable=too-many-instance-attributes
 
             log.debug("[Whisper] Utterance confidence: %.1f%% — '%s'", confidence, transcript)
 
-            # on_transcript (final=True) -------------------------------------------------
+            # --------------------------------------------------------------
+            # on_transcript  (interim / final)  — forwards confidence when available
+            # --------------------------------------------------------------
             cb_tr = self._callbacks.get("on_transcript")
             if cb_tr:
                 try:
-                    cb_tr(transcript, True)
+                    # Pass *is_final* flag as second positional arg for b/c
+                    # with DeepgramStreamer signature.  We additionally append
+                    # *confidence* as third arg so advanced handlers can use it.
+                    cb_tr(transcript, is_final, confidence)
                 except Exception as e:
                     log.error("on_transcript callback error: %s", e)
 
             # on_utterance --------------------------------------------------------------
             cb_utt = self._callbacks.get("on_utterance")
-            if cb_utt:
+            if cb_utt and is_final:
                 try:
                     # Forward confidence as second positional argument (backward-compatible)
                     cb_utt(transcript, confidence)

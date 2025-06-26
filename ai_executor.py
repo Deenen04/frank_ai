@@ -62,7 +62,7 @@ async def generate_reply(payload: Dict[str, Any]) -> Dict[str, Any]:
     # Call hosted LLM
     raw_text = await make_openai_request(
         api_key_manager=None,
-        model="qwen2.5:72b",
+        model="openchat/openchat-3.5-1210",
         messages=messages,
         max_tokens=256,
         temperature=0.3,
@@ -73,7 +73,7 @@ async def generate_reply(payload: Dict[str, Any]) -> Dict[str, Any]:
     class_prompt = DECISION_PROMPT.replace("{ai_reply}", raw_text)
     decision_raw = await make_openai_request(
         api_key_manager=None,
-        model="qwen2.5:72b",
+        model="openchat/openchat-3.5-1210",
         messages=[{"role": "user", "content": class_prompt}],
         max_tokens=1, temperature=0.0, top_p=1.0,
     ) or ""

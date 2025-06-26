@@ -3,12 +3,19 @@ import httpx
 import asyncio
 from typing import List, Dict, Any, Optional, Union, AsyncGenerator
 import json
+import os
 
 # Configure logging
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
-# Timeout settings
+# ----------------------------------------------------------------------
+# Endpoint & timeout settings
+# ----------------------------------------------------------------------
+
+LLM_API_BASE = os.getenv("LLM_API_BASE", "http://127.0.0.1:8000")
+CHAT_ENDPOINT = f"{LLM_API_BASE.rstrip('/')}/completion"
+
 CHAT_TIMEOUT = 60  # seconds
 
 # ----------------------------------------------------------------------
@@ -36,7 +43,7 @@ async def make_openai_request(
             "temperature": temperature,
             "top_p": top_p,
         }
-        url = "http://localhost:21434/api/chat"
+        url = CHAT_ENDPOINT
 
         async with httpx.AsyncClient(timeout=CHAT_TIMEOUT) as client:
             response = await client.post(url, json=payload)
@@ -119,7 +126,7 @@ async def make_openai_request_stream(
         "top_p": top_p,
     }
 
-    url_stream = "http://localhost:21434/api/chat"
+    url_stream = CHAT_ENDPOINT
 
     buffer: List[str] = []  # buffer for chunks we will yield
     cumulative_text: str = ""  # track text already emitted to avoid duplicates when endpoint sends cumulative payloads

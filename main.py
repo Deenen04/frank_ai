@@ -379,7 +379,7 @@ async def media_websocket_endpoint(ws: WebSocket): # Renamed `media`
             return
         log.debug("[DG] Speech start detected (waiting for transcript before taking action).")
 
-    MIN_TRANSCRIPT_CONFIDENCE = 50.0  # percent
+    MIN_TRANSCRIPT_CONFIDENCE = 35.0  # percent
 
     def on_dg_transcript(*args):
         """Handle interim transcripts (Deepgram or Whisper partials).

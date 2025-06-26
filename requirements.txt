@@ -16,3 +16,4 @@ supabase
 langid
 torch
 faster-whisper
+vosk

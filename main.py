@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 from starlette.websockets import WebSocketState # Import for checking WebSocket state
 
 
-from whisper_streamer import WhisperStreamer as DeepgramStreamer
+from vosk_streamer import VoskStreamer as DeepgramStreamer
 from elevenlabs.client import ElevenLabs
 # Streaming generation helper
 from apiChatCompletion import make_openai_request
@@ -61,14 +61,14 @@ HOSTNAME = os.getenv("HOSTNAME_twilio", "localhost:8000") # Ensure port if uvico
 DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_API_KEY")  # optional now – kept for backwards compat
 ELEVEN_API_KEY = os.getenv("ELEVEN_API_KEY")
 
-# Local Whisper no longer needs the Deepgram key – do not error if missing.
+# Local Vosk no longer needs the Deepgram key – do not error if missing.
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)-7s | %(name)s | %(message)s")
 log = logging.getLogger("voicebot")
 
-# Enable DEBUG logging for Deepgram VAD debugging
-deepgram_log = logging.getLogger("deepgram_streamer")
-deepgram_log.setLevel(logging.DEBUG)
+# Enable DEBUG logging for Vosk VAD debugging
+vosk_log = logging.getLogger("vosk_streamer")
+vosk_log.setLevel(logging.DEBUG)
 
 VOICE_IDS = {"en": "21m00Tcm4TlvDq8ikWAM", "fr": "ZQFCSsF1tIcjtMZJ6VCA", "de": "v3V1d2rk6528UrLKRuy8"}
 FAREWELL_LINES = {"en": "Thanks for calling. Goodbye.", "fr": "Merci d'avoir appelé. Au revoir.", "de": "Danke für Ihren Anruf. Auf Wiedersehen."}
@@ -91,7 +91,7 @@ class TranscriptSanitizer:
         
         # Handle based on whether this is a final or interim result
         if is_final:
-            # This is a final result from Deepgram ASR
+            # This is a final result from Vosk ASR
             # Add any existing interim to final parts first
             if self._last_interim:
                 self._final_parts.append(self._last_interim)
@@ -100,7 +100,7 @@ class TranscriptSanitizer:
             self._final_parts.append(new_transcript)
         else:
             # This is an interim result - replace the last interim
-            # Deepgram interim results usually replace previous interims for the same utterance
+            # Vosk interim results usually replace previous interims for the same utterance
             self._last_interim = new_transcript
 
     def get_current_transcript(self) -> str:
@@ -161,7 +161,7 @@ tts_client = ElevenLabs(api_key=ELEVEN_API_KEY)
 
 @app.on_event("startup")
 async def startup_event(): # Renamed to avoid conflict with `startup` variable if any
-    log.info("[STARTUP] Voice agent started — integrated DeepgramStreamer")
+    log.info("[STARTUP] Voice agent started — integrated VoskStreamer")
 
 @app.post("/voice", response_class=HTMLResponse)
 async def answer_call(_request: Request, From: str = Form(...), To: str = Form(...)): # Renamed `answer`
@@ -194,7 +194,7 @@ async def answer_call(_request: Request, From: str = Form(...), To: str = Form(.
 async def play_greeting(lang: str, sid: str, ws: WebSocket, tts_controller: TTSController, state: dict):
     voice_id, text = VOICE_IDS.get(lang, VOICE_IDS["en"]), GREETING_LINES.get(lang, GREETING_LINES["en"])
     
-    # state["user_is_speaking"] = False # This should be controlled by Deepgram events
+            # state["user_is_speaking"] = False # This should be controlled by Vosk events
     tts_controller.is_speaking = True
     log.info(f"[GREETING-{sid}] Playing: '{text}'")
     try:
@@ -274,7 +274,7 @@ async def media_websocket_endpoint(ws: WebSocket): # Renamed `media`
         "pending_transcript_parts": [],   # Store partial transcripts for aggregation
     }
     tts_controller = TTSController()
-    # DeepgramStreamer now emits complete utterances, so we no longer need TranscriptSanitizer.
+    # VoskStreamer now emits complete utterances, so we no longer need TranscriptSanitizer.
     current_language = "multi" # Default language
     conversation_history: List[str] = []
     
@@ -285,22 +285,25 @@ async def media_websocket_endpoint(ws: WebSocket): # Renamed `media`
 
 
     deepgram_streamer = DeepgramStreamer( # Renamed from streamer
-        api_key=DEEPGRAM_API_KEY,
+        api_key=DEEPGRAM_API_KEY,  # Ignored by VoskStreamer but kept for compatibility
         encoding="mulaw", # Twilio default is mulaw
-        sample_rate=8000, # Twilio default is 8000Hz
-        interim_results=False,
+        sample_rate=8000, # Twilio default is 8000Hz - perfect for Vosk!
+        interim_results=True,  # Enable partial results for interruption
         vad_events=True,  # Keep VAD for fallback even though endpointing is used
         punctuate=True,
-        model='nova-3',  # Use nova-3 as requested
+        model='small',  # Use small Vosk model for faster processing
         language=current_language, # Start with default, can be changed
+        allowed_languages=["en", "de", "fr"],  # Restrict to supported languages
         # Enhanced amplitude-based VAD parameters
         use_amplitude_vad=True,
         amplitude_threshold_db=-5.0,  # This translates to 700 RMS - more reliable speech detection
-        silence_timeout=2.0  # Longer timeout for natural speech patterns
+        silence_timeout=0.7,  # Use default Vosk silence timeout
+        partial_interval=0.6,  # Emit partial results every 0.6s for interruption
+        models_dir="./vosk_models"  # Directory to store downloaded Vosk models
     )
 
     async def process_final_utterance(final_utterance: str):
-        """Handle a complete user utterance coming from DeepgramStreamer."""
+        """Handle a complete user utterance coming from VoskStreamer."""
         nonlocal ai_response_task, current_language
         
         # --------------------------------------------------------------
@@ -379,14 +382,14 @@ async def media_websocket_endpoint(ws: WebSocket): # Renamed `media`
             return
         log.debug("[DG] Speech start detected (waiting for transcript before taking action).")
 
-    MIN_TRANSCRIPT_CONFIDENCE = 50.0  # percent
+    MIN_TRANSCRIPT_CONFIDENCE = 30.0  # percent
 
     def on_dg_transcript(*args):
-        """Handle interim transcripts (Deepgram or Whisper partials).
+        """Handle interim transcripts (Vosk partials).
 
         Accepts both the 2-argument signature (*transcript*, *is_final*) used by
-        DeepgramStreamer **and** the 3-argument signature (*transcript*,
-        *is_final*, *confidence*) emitted by the enhanced WhisperStreamer.
+        legacy streamers **and** the 3-argument signature (*transcript*,
+        *is_final*, *confidence*) emitted by the enhanced VoskStreamer.
         """
         if call_state["stop_call"]:
             return
@@ -396,7 +399,7 @@ async def media_websocket_endpoint(ws: WebSocket): # Renamed `media`
         # ------------------------------------------------------------------
         transcript = args[0] if args else ""
         is_final = args[1] if len(args) >= 2 else False
-        confidence = args[2] if len(args) >= 3 else 100.0  # Deepgram has no conf
+        confidence = args[2] if len(args) >= 3 else 80.0  # Default confidence for Vosk
 
         if not transcript.strip():
             return
@@ -421,12 +424,12 @@ async def media_websocket_endpoint(ws: WebSocket): # Renamed `media`
         call_state["user_is_speaking"] = False
         log.info("[DG] Speech end detected.")
 
-    MIN_WHISPER_CONFIDENCE = 50.0  # percent – only process utterances above this threshold
+    MIN_VOSK_CONFIDENCE = 50.0  # percent – only process utterances above this threshold
     
     def on_dg_utterance(*args):
         """Handle complete utterances emitted by the ASR stack.
 
-        The *WhisperStreamer* now forwards a *confidence* score (0-100) as the
+        The *VoskStreamer* now forwards a *confidence* score (0-100) as the
         second positional argument.  For backwards-compatibility we accept both
         the original 1-argument as well as the new 2-argument signature.
         """
@@ -436,7 +439,7 @@ async def media_websocket_endpoint(ws: WebSocket): # Renamed `media`
         # Parse *args* → (utterance, confidence)
         if len(args) == 1:
             utterance = args[0]
-            confidence = 100.0  # assume perfect confidence when value missing (e.g. Deepgram backend)
+            confidence = 80.0  # assume good confidence when value missing
         else:
             utterance, confidence = args[:2]
 
@@ -444,8 +447,8 @@ async def media_websocket_endpoint(ws: WebSocket): # Renamed `media`
         log.info("[UTTERANCE] Confidence %.1f%% — '%s'", confidence, utterance)
 
         # Discard low-confidence utterances
-        if confidence < MIN_WHISPER_CONFIDENCE:
-            log.warning("[UTTERANCE] Ignoring low-confidence transcript (%.1f%% < %.1f)", confidence, MIN_WHISPER_CONFIDENCE)
+        if confidence < MIN_VOSK_CONFIDENCE:
+            log.warning("[UTTERANCE] Ignoring low-confidence transcript (%.1f%% < %.1f)", confidence, MIN_VOSK_CONFIDENCE)
             return
 
         # This is triggered by the enhanced VAD system:
@@ -461,11 +464,11 @@ async def media_websocket_endpoint(ws: WebSocket): # Renamed `media`
     deepgram_streamer.on('on_utterance', on_dg_utterance)
 
     try:
-        log.info("[/media] Connecting to Deepgram...")
+        log.info("[/media] Connecting to Vosk...")
         await deepgram_streamer.connect()
-        log.info("[/media] Deepgram connection successful.")
+        log.info("[/media] Vosk connection successful.")
     except Exception as e:
-        log.error(f"[/media] Failed to connect to Deepgram: {e}", exc_info=True)
+        log.error(f"[/media] Failed to connect to Vosk: {e}", exc_info=True)
         # Send error response to client and close
         if ws.client_state == WebSocketState.CONNECTED:
             await ws.close(code=1011, reason="Failed to connect to speech service")
@@ -527,14 +530,14 @@ async def media_websocket_endpoint(ws: WebSocket): # Renamed `media`
                 ))
 
             elif event_type == "media":
-                if call_state["stop_call"] or not deepgram_streamer.is_open():  # DG connection check
+                if call_state["stop_call"] or not deepgram_streamer.is_open():  # Vosk connection check
                     continue 
                 
                 payload = base64.b64decode(message["media"]["payload"])
                 try:
                     await deepgram_streamer.send(payload)
                 except Exception as e:
-                    log.warning(f"[/media] Error sending audio to Deepgram: {e}")
+                    log.warning(f"[/media] Error sending audio to Vosk: {e}")
                     # Continue processing, don't break the loop for individual send errors
 
             elif event_type == "mark":
@@ -582,13 +585,13 @@ async def media_websocket_endpoint(ws: WebSocket): # Renamed `media`
         # Stop any active TTS
         tts_controller.stop_immediately()
 
-        # Clean up Deepgram connection
+        # Clean up Vosk connection
         if deepgram_streamer:
-            log.info("[/media] Finishing Deepgram streamer.")
+            log.info("[/media] Finishing Vosk streamer.")
             try:
                 await deepgram_streamer.finish()
             except Exception as e:
-                log.error(f"[/media] Error finishing Deepgram streamer: {e}", exc_info=True)
+                log.error(f"[/media] Error finishing Vosk streamer: {e}", exc_info=True)
 
         # Ensure WebSocket is closed if not already
         if ws.client_state == WebSocketState.CONNECTED:

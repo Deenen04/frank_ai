@@ -95,7 +95,8 @@ class WhisperStreamer:  # pylint: disable=too-many-instance-attributes
 
         self._language_locked = False  # once model detects, we lock for this call
         self.language = language.lower() if language else "multi"
-        self._allowed_languages = ["en", "fr", "de"] if allowed_languages is None else [l.lower() for l in allowed_languages]
+        # If *allowed_languages* is None, allow *all* languages.
+        self._allowed_languages = None if allowed_languages is None else [l.lower() for l in allowed_languages]
 
         log.info(
             "[Whisper-INIT] Using faster-whisper model '%s', amp-threshold %.1f dB (→ %.0f), silence %.1fs, allowed=%s",
@@ -270,7 +271,7 @@ class WhisperStreamer:  # pylint: disable=too-many-instance-attributes
                 log.error("Language detection failed: %s", e)
                 whisper_language = None
 
-            if whisper_language is None or whisper_language not in self._allowed_languages:
+            if self._allowed_languages and (whisper_language is None or whisper_language not in self._allowed_languages):
                 log.debug("[Whisper] Skipping segment – detected lang '%s' not in %s", whisper_language, self._allowed_languages)
                 return  # ignore this segment entirely
         else:

@@ -54,10 +54,11 @@ async def make_openai_request(
     *,
     api_key_manager: Optional[object],  # not used anymore
     model: str,
-    messages: List[Dict[str, Any]],
-    max_tokens: int,
-    temperature: float,
-    top_p: float,
+    prompt: Optional[str] = None,
+    messages: Optional[List[Dict[str, Any]]] = None,
+    max_tokens: int = 256,
+    temperature: float = 0.7,
+    top_p: float = 0.9,
     response_format: Optional[Dict[str, str]] = None,
 ) -> Optional[str]:
     """Send prompt to hosted model instead of OpenAI.
@@ -79,7 +80,10 @@ async def make_openai_request(
         # ------------------------------------------------------------------
         # Flatten messages → prompt string required by backend
         # ------------------------------------------------------------------
-        prompt: str = _messages_to_prompt(messages)
+        if prompt is None:
+            if messages is None:
+                raise ValueError("make_openai_request: Either 'prompt' or 'messages' must be provided.")
+            prompt = _messages_to_prompt(messages)
 
         # Build request payload per backend specification
         payload: Dict[str, Any] = {
@@ -152,7 +156,8 @@ class APIKeyManager:
 async def make_openai_request_stream(
     *,
     model: str,
-    messages: List[Dict[str, Any]],
+    prompt: Optional[str] = None,
+    messages: Optional[List[Dict[str, Any]]] = None,
     temperature: float = 0.1,
     top_p: float = 0.1,
     chunk_size_words: int = 1,
@@ -165,7 +170,10 @@ async def make_openai_request_stream(
     non-streaming request and simply chunks the full response.
     """
 
-    prompt: str = _messages_to_prompt(messages)
+    if prompt is None:
+        if messages is None:
+            raise ValueError("make_openai_request_stream: Either 'prompt' or 'messages' must be provided.")
+        prompt = _messages_to_prompt(messages)
 
     payload = {
         "prompt": prompt,
@@ -252,7 +260,7 @@ async def make_openai_request_stream(
     full_text = await make_openai_request(
         api_key_manager=None,
         model=model,
-        messages=messages,
+        prompt=prompt,
         max_tokens=2048,
         temperature=temperature,
         top_p=top_p,

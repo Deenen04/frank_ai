@@ -10,7 +10,7 @@ from string import Formatter
 from typing import Any, Dict, List
 
 from apiChatCompletion import APIKeyManager, make_openai_request
-from ai_prompt import DECISION_PROMPT, build_messages
+from ai_prompt import DECISION_PROMPT, build_prompt
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -50,21 +50,18 @@ async def generate_reply(payload: Dict[str, Any]) -> Dict[str, Any]:
         logger.warning(f"History has {len(history)} lines, trimming to last {MAX_HISTORY_LINES}.")
         history = history[-MAX_HISTORY_LINES:]
 
-    # Build messages list for the new /api/chat endpoint (default to English system prompt)
-    messages = build_messages(history, lang="en")
+    # Build single prompt string for the hosted backend
+    prompt_str = build_prompt(history, lang="en")
 
-    # ✅ DEBUG: Log the messages being sent to the AI.
-    logger.info("--- Sending Messages to AI ---")
-    for m in messages:
-        logger.info(f"{m['role']}: {m['content']}")
-    logger.info("------------------------------")
+    # ✅ DEBUG: Log prompt being sent to the AI.
+    logger.info("--- Prompt Sent to AI ---\n%s\n-------------------------", prompt_str)
 
     # Call hosted LLM
     raw_text = await make_openai_request(
         api_key_manager=None,
         model="openchat/openchat-3.5-1210",
-        messages=messages,
-        max_tokens=256,
+        prompt=prompt_str,
+        max_tokens=100,
         temperature=0.3,
         top_p=0.95,
     )
@@ -74,8 +71,10 @@ async def generate_reply(payload: Dict[str, Any]) -> Dict[str, Any]:
     decision_raw = await make_openai_request(
         api_key_manager=None,
         model="openchat/openchat-3.5-1210",
-        messages=[{"role": "user", "content": class_prompt}],
-        max_tokens=1, temperature=0.0, top_p=1.0,
+        prompt=class_prompt,
+        max_tokens=10,
+        temperature=0.0,
+        top_p=1.0,
     ) or ""
 
     dec = decision_raw.strip().upper()

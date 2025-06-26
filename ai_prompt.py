@@ -115,3 +115,34 @@ def build_messages(history_lines: List[str], lang: str = "en") -> List[Dict[str,
             content = line.split(":", 1)[1].strip()
             messages.append({"role": "assistant", "content": content})
     return messages
+
+# -------------------------------------------------------------------
+# New helper to build a **single** prompt string for the hosted backend
+# -------------------------------------------------------------------
+
+def build_prompt(history_lines: List[str], lang: str = "en") -> str:
+    """Return a *single* prompt string ready for the hosted LLM.
+
+    Format:
+        <|begin_of_text|>
+        <system_prompt>
+        
+        Human: ...
+        AI: ...
+        Human: ...
+        
+        AI:
+
+    We keep the simple "Human:" / "AI:" prefixes so the model can
+    differentiate turns without the verbose JSON chat format. A final
+    trailing "AI:" cue is appended so the model continues writing from
+    the assistant's perspective.
+    """
+    system_prompt = get_system_prompt(lang)
+
+    prompt_parts: List[str] = ["<|begin_of_text|>", system_prompt, ""]
+    prompt_parts.extend(history_lines)
+    # Ensure the assistant tag is last so the model continues correctly
+    if not history_lines or not history_lines[-1].startswith("AI:"):
+        prompt_parts.append("AI:")
+    return "\n".join(prompt_parts)

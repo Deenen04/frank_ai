@@ -24,7 +24,7 @@ from apiChatCompletion import make_openai_request
 # Import language‐specific prompt templates
 from ai_prompt import (
     DECISION_PROMPT,
-    build_messages,
+    build_prompt,
 )
 # (generate_reply is kept for non-streaming fallbacks if needed)
 from ai_executor import generate_reply  # Import the real AI function (fallback)
@@ -616,10 +616,9 @@ async def handle_ai_turn(call_state: dict, lang: str, ws: WebSocket,
 
     MAX_HISTORY_LINES = 20  # Keep in sync with ai_executor
     history_for_prompt = conversation_history[-MAX_HISTORY_LINES:]
-    full_conversation_text = "\n".join(history_for_prompt)
 
-    # Build chat messages for new backend
-    messages_for_chat = build_messages(history_for_prompt, lang_selected)
+    # Build single prompt for the backend
+    prompt_for_chat = build_prompt(history_for_prompt, lang_selected)
 
     # --------------------------------------------------------------
     # Fetch the full assistant reply in one request (no streaming)
@@ -628,7 +627,7 @@ async def handle_ai_turn(call_state: dict, lang: str, ws: WebSocket,
         ai_response_text = await make_openai_request(
             api_key_manager=None,
             model="openchat/openchat-3.5-1210",
-            messages=messages_for_chat,
+            prompt=prompt_for_chat,
             max_tokens=512,
             temperature=0.3,
             top_p=0.95,
@@ -669,8 +668,8 @@ async def handle_ai_turn(call_state: dict, lang: str, ws: WebSocket,
         decision_raw = await make_openai_request(
             api_key_manager=None,
             model="openchat/openchat-3.5-1210",
-            messages=[{"role": "user", "content": decision_prompt}],
-            max_tokens=512,
+            prompt=decision_prompt,
+            max_tokens=20,
             temperature=0.0,
             top_p=1.0,
         ) or ""

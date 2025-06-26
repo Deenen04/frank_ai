@@ -173,7 +173,7 @@ async def play_greeting(lang: str, sid: str, ws: WebSocket, tts_controller: TTSC
     log.info(f"[GREETING-{sid}] Playing: '{text}'")
     try:
         tts_controller.current_generator = tts_client.text_to_speech.stream(
-            text=text, voice_id=voice_id, model_id="eleven_multilingual_v2", # eleven_flash_v2_5 is not a public model name. Use eleven_multilingual_v2 or eleven_turbo_v2
+            text=text, voice_id=voice_id, model_id="eleven_turbo_v2_5", # eleven_flash_v2_5 is not a public model name. Use eleven_multilingual_v2 or eleven_turbo_v2
             output_format="ulaw_8000", optimize_streaming_latency=0
         )
         for audio_chunk_count, audio in enumerate(tts_controller.current_generator):
@@ -670,7 +670,7 @@ async def handle_ai_turn(call_state: dict, lang: str, ws: WebSocket,
             api_key_manager=None,
             model="openchat/openchat-3.5-1210",
             messages=[{"role": "user", "content": decision_prompt}],
-            max_tokens=1,
+            max_tokens=512,
             temperature=0.0,
             top_p=1.0,
         ) or ""

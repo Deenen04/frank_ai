@@ -40,9 +40,13 @@ async def make_openai_request(
             "model": model,
             "stream": False,
             "messages": messages,
+            "max_tokens": max_tokens,
             "temperature": temperature,
             "top_p": top_p,
         }
+        # Include response_format when specified (e.g. {"type": "json_object"})
+        if response_format is not None:
+            payload["response_format"] = response_format
         url = CHAT_ENDPOINT
 
         async with httpx.AsyncClient(timeout=CHAT_TIMEOUT) as client:
@@ -82,7 +86,13 @@ async def make_openai_request(
             return ""
 
     except Exception as e:
-        logger.error("Hosted LLM request failed: %s", e)
+        # More helpful debug information on failure
+        if isinstance(e, httpx.HTTPStatusError):
+            logger.error(
+                "Hosted LLM request failed: HTTP %s – %s", e.response.status_code, e.response.text
+            )
+        else:
+            logger.error("Hosted LLM request failed: %s", e)
         return None
 
 

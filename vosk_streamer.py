@@ -20,18 +20,22 @@ __all__ = ["VoskStreamer"]
 log = logging.getLogger("vosk_streamer")
 
 # Model URLs for German, English, and French
+# Using telephony/narrowband models that natively support 8kHz audio
 VOSK_MODELS = {
     "en": {
-        "small": "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip",
-        "large": "https://alphacephei.com/vosk/models/vosk-model-en-us-0.22.zip"
+        # Indian English model is specifically designed for telecom and broadcast
+        "small": "https://alphacephei.com/vosk/models/vosk-model-small-en-in-0.4.zip",
+        "large": "https://alphacephei.com/vosk/models/vosk-model-en-in-0.5.zip"
     },
     "de": {
+        # German telephony model - specifically designed for telephony and server
         "small": "https://alphacephei.com/vosk/models/vosk-model-small-de-0.15.zip", 
-        "large": "https://alphacephei.com/vosk/models/vosk-model-de-0.21.zip"
+        "large": "https://alphacephei.com/vosk/models/vosk-model-de-0.21.zip"  # This is the telephony model
     },
     "fr": {
+        # LINTO French model has good performance for various audio conditions
         "small": "https://alphacephei.com/vosk/models/vosk-model-small-fr-0.22.zip",
-        "large": "https://alphacephei.com/vosk/models/vosk-model-fr-0.22.zip"
+        "large": "https://alphacephei.com/vosk/models/vosk-model-fr-0.6-linto-2.2.0.zip"  # LINTO model
     }
 }
 

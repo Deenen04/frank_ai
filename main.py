@@ -727,9 +727,10 @@ async def handle_ai_turn(call_state: dict, lang: str, ws: WebSocket,
     # second LLM round-trip.  The tag must be either [[END]] or
     # [[CONTINUE]] and appear **after** the assistant reply.
     prompt_for_chat += (
-        "\n\nAt the very end of your reply output exactly the tag [[END]] "
-        "if the conversation is finished or [[CONTINUE]] if it should "
-        "continue.  Do not output anything after the tag." 
+        "\n\nAfter your response add exactly one of the following tags on its own line:" 
+        "\n  • [[END]]     – ONLY when you have already (a) confirmed an appointment slot, (b) gathered the caller\'s name and phone number, AND (c) given a goodbye." 
+        "\n  • [[CONTINUE]] – in all other situations (including when you still need to ask for name or phone)." 
+        "\nDo not output anything after the tag." 
         "\n\nAssistant:"
     )
 

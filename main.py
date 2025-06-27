@@ -711,7 +711,7 @@ async def handle_ai_turn(call_state: dict, lang: str, ws: WebSocket,
     # we will *stream* the answer instead of waiting for the entire text.
     # ------------------------------------------------------------------
 
-    MAX_HISTORY_LINES = 10  # Keep in sync with ai_executor
+    MAX_HISTORY_LINES = 100  # Keep in sync with ai_executor
     history_for_prompt = conversation_history[-MAX_HISTORY_LINES:]
 
     # Build single prompt for the backend

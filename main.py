@@ -48,7 +48,7 @@ log = logging.getLogger("voicebot")
 deepgram_log = logging.getLogger("deepgram_streamer")
 deepgram_log.setLevel(logging.DEBUG)
 
-VOICE_IDS = {"en": "kdnRe2koJdOK4Ovxn2DI", "fr": "6wsYTkh7uhMGLNTiM1TC", "de": "KXxZd16DiBqt82nbarJx"}
+VOICE_IDS = {"en": "kdnRe2koJdOK4Ovxn2DI", "fr": "MNKK2Wl2wbbsEPQTHZGt", "de": "YYDsZT3K2y6tv7X1aj6N"}
 FAREWELL_LINES = {"en": "Thanks for calling. Goodbye.", "fr": "Merci d'avoir appelé. Au revoir.", "de": "Danke für Ihren Anruf. Auf Wiedersehen."}
 GREETING_LINES = {"en": "Hi, This is Frank Babar Clinic, I am here to assist you book an appointment with us today. How can I help you?", "fr": "Bonjour, comment puis-je vous aider?", "de": "Hallo, wie kann ich Ihnen helfen?"}
 END_DELAY_SEC = 1
@@ -497,12 +497,20 @@ async def handle_ai_turn(call_state: dict, lang: str, ws: WebSocket,
         log.info(f"[AI_TURN-{stream_sid}] No AI response, skipping TTS.")
         return # Nothing to say.
 
+    # Detect language from AI response to select the correct TTS voice.
+    # The 'lang' parameter is used for prompt context, but the voice must match the generated text.
+    tts_lang, _ = langid.classify(ai_response_text)
+    if tts_lang not in VOICE_IDS:
+        log.warning(f"[LANG-DETECT-TTS] AI response language '{tts_lang}' has no voice. Falling back to conversation language '{lang}'.")
+        tts_lang = lang
+    voice_id = VOICE_IDS.get(tts_lang, VOICE_IDS["en"])
+    log.info(f"[TTS-VOICE] Selected voice for lang='{tts_lang}' based on AI response: '{ai_response_text[:50]}...'")
+
     tts_controller.is_speaking = True # Set speaking state to True before we start sending audio
     
     # --- Speaking logic using the new non-blocking function ---
     tts_controller.reset_spoken_text()
     all_spoken_successfully = True
-    voice_id = VOICE_IDS.get(lang, VOICE_IDS["en"])
 
     words = ai_response_text.split()
     for i in range(0, len(words), 100):

@@ -70,7 +70,7 @@ log = logging.getLogger("voicebot")
 deepgram_log = logging.getLogger("deepgram_streamer")
 deepgram_log.setLevel(logging.DEBUG)
 
-VOICE_IDS = {"en": "21m00Tcm4TlvDq8ikWAM", "fr": "ZQFCSsF1tIcjtMZJ6VCA", "de": "v3V1d2rk6528UrLKRuy8"}
+VOICE_IDS = {"en": "kdnRe2koJdOK4Ovxn2DI", "fr": "ZQFCSsF1tIcjtMZJ6VCA", "de": "v3V1d2rk6528UrLKRuy8"}
 FAREWELL_LINES = {"en": "Thanks for calling. Goodbye.", "fr": "Merci d'avoir appelé. Au revoir.", "de": "Danke für Ihren Anruf. Auf Wiedersehen."}
 GREETING_LINES = {"en": "Hi, This is Frank Babar Clinic, I am here to assist you book an appointment with us today. How can I help you?", "fr": "Bonjour, comment puis-je vous aider?", "de": "Hallo, wie kann ich Ihnen helfen?"}
 END_DELAY_SEC = 1 # Reduced for faster testing
@@ -722,7 +722,7 @@ async def handle_ai_turn(call_state: dict, lang: str, ws: WebSocket,
     # --------------------------------------------------------------
     # Speak the reply in CHUNK_WORD_COUNT-word chunks
     # --------------------------------------------------------------
-    CHUNK_WORD_COUNT = 15
+    CHUNK_WORD_COUNT = 100
     words = ai_response_text.split()
     for i in range(0, len(words), CHUNK_WORD_COUNT):
         if call_state["stop_call"]:

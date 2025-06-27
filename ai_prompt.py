@@ -2,7 +2,7 @@
 # 2) Classify the assistant reply: should we continue booking, route to a human, or end?
 # —————————————————————————————————————————————————————————————————————————————
 DECISION_PROMPT = """You are a system that reads the receptionist AI's last message and decides whether the conversation is finished.
-- END: if the assistant message indicates the booking is complete or contains a clear goodbye.
+- END: if the user says goodbye or the conversation is finished. else CONTINUE
 - CONTINUE: otherwise, the booking conversation should go on.
 
 Assistant reply:

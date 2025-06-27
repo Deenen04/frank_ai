@@ -181,7 +181,7 @@ async def play_greeting(lang: str, sid: str, ws: WebSocket, tts_controller: TTSC
         tts_controller.current_generator = tts_client.text_to_speech.stream(
             text=text,
             voice_id=voice_id,
-            model_id="eleven_turbo_v2", # Using a valid, fast model
+            model_id="eleven_multilingual_v2", # Using a valid, fast model
             output_format="ulaw_8000",
             optimize_streaming_latency=0
         )
@@ -440,7 +440,7 @@ async def handle_ai_turn(call_state: dict, lang: str, ws: WebSocket,
 
         try:
             tts_controller.current_generator = tts_client.text_to_speech.stream(
-                text=text_chunk, voice_id=voice_id, model_id="eleven_turbo_v2",
+                text=text_chunk, voice_id=voice_id, model_id="eleven_multilingual_v2",
                 output_format="ulaw_8000", optimize_streaming_latency=0,
             )
             tts_controller.producer_task = asyncio.create_task(

@@ -270,11 +270,15 @@ async def media_websocket_endpoint(ws: WebSocket):
 
     async def process_final_utterance(final_utterance: str):
         nonlocal ai_response_task, current_language
+        call_state["user_is_speaking"] = False # Utterance ended, so user is no longer speaking.
+
         if not final_utterance.strip():
-            call_state["user_is_speaking"] = False
-            return
+            return # Ignore empty utterances.
+
+        if _is_trivial_thanks(final_utterance):
+            log.info(f"Ignoring trivial 'thank you' utterance, likely a misfire: '{final_utterance}'")
+            return # Ignore and wait for more substantive input.
         
-        call_state["user_is_speaking"] = False
         display_final_turn(call_state["caller_phone_number"], final_utterance)
         
         if ai_response_task and not ai_response_task.done():
@@ -535,4 +539,4 @@ async def handle_ai_turn(call_state: dict, lang: str, ws: WebSocket,
 
 def _is_trivial_thanks(text: str) -> bool:
     txt = text.strip().lower().rstrip(".!?")
-    return txt in {"thank you", "you"}
+    return txt == "thank you"

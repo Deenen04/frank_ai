@@ -6,6 +6,7 @@ import logging
 import re
 from typing import List, Optional
 import langid
+import audioop  # for μ-law → PCM conversion & RMS amplitude
 langid.set_languages(["en", "fr", "de"])
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Form
@@ -261,6 +262,12 @@ async def media_websocket_endpoint(ws: WebSocket):
         partial_interval=0.3  # emit partials every 300 ms for rapid barge-in
     )
 
+    # ------------------------------------------------------------------
+    # Lightweight amplitude VAD (μ-law RMS) for *instant* barge-in.
+    # ------------------------------------------------------------------
+    AMP_VAD_DB = -30.0  # dBFS – keep in sync with Whisper settings
+    AMP_VAD_LINEAR = 32768 * (10 ** (AMP_VAD_DB / 20.0))
+
     async def process_final_utterance(final_utterance: str):
         nonlocal ai_response_task, current_language
         if not final_utterance.strip():
@@ -344,8 +351,37 @@ async def media_websocket_endpoint(ws: WebSocket):
                 ))
 
             elif event_type == "media":
-                if not call_state["stop_call"] and deepgram_streamer.is_open():
-                    await deepgram_streamer.send(base64.b64decode(message["media"]["payload"]))
+                if call_state["stop_call"]:
+                    continue
+
+                # Decode once and share bytes for both VAD & ASR
+                try:
+                    audio_bytes = base64.b64decode(message["media"]["payload"])
+                except Exception:
+                    continue  # malformed packet – skip
+
+                # ------------------------------------------------------------------
+                # Amplitude VAD: stop TTS the *moment* the caller makes a sound
+                # ------------------------------------------------------------------
+                if tts_controller.is_speaking:
+                    try:
+                        pcm16 = audioop.ulaw2lin(audio_bytes, 2)
+                        rms = audioop.rms(pcm16, 2)
+                        if rms > AMP_VAD_LINEAR:
+                            log.warning(
+                                "[AMP-VAD] Voice detected (RMS=%d > %.0f) → stopping TTS immediately.",
+                                rms,
+                                AMP_VAD_LINEAR,
+                            )
+                            call_state["user_is_speaking"] = True
+                            asyncio.create_task(tts_controller.stop_immediately())
+                            asyncio.create_task(send_twilio_clear())
+                    except Exception as _:
+                        pass  # ignore audioop errors
+
+                # Forward to Whisper / Deepgram emulator
+                if deepgram_streamer.is_open():
+                    await deepgram_streamer.send(audio_bytes)
 
             elif event_type == "stop":
                 log.info(f"[WS-STOP] Received stop event. Call is ending.")

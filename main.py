@@ -52,27 +52,6 @@ def fast_lang_detect(text: str) -> str:
         return "de"
     return "en"
 
-def contains_thank_variation(text: str) -> bool:
-    """Check if text contains variations of 'thank' words that should be filtered out."""
-    if not text:
-        return False
-    
-    # Convert to lowercase for case-insensitive matching
-    text_lower = text.lower()
-    
-    # List of thank variations to detect
-    thank_variations = [
-        "thank", "thanks", "thank you", "thankyou", "thx", "ty",
-        "merci", "mercie", "grazie", "danke", "dank"
-    ]
-    
-    # Check if any variation is found in the text
-    for variation in thank_variations:
-        if variation in text_lower:
-            return True
-    
-    return False
-
 def route_call(call_sid):
     log.info(f"Mock route_call called for SID: {call_sid}")
 
@@ -312,7 +291,7 @@ async def media_websocket_endpoint(ws: WebSocket): # Renamed `media`
         interim_results=False,
         vad_events=True,  # Keep VAD for fallback even though endpointing is used
         punctuate=True,
-        model='nova-3',  # Use nova-3 as requested
+        model='groq-whisper-large-v3-turbo',  # Use groq-whisper-large-v3-turbo
         language=current_language, # Start with default, can be changed
         # Enhanced amplitude-based VAD parameters
         use_amplitude_vad=True,
@@ -467,16 +446,6 @@ async def media_websocket_endpoint(ws: WebSocket): # Renamed `media`
         # Discard low-confidence utterances
         if confidence < MIN_WHISPER_CONFIDENCE:
             log.warning("[UTTERANCE] Ignoring low-confidence transcript (%.1f%% < %.1f)", confidence, MIN_WHISPER_CONFIDENCE)
-            return
-
-        # Filter out utterances containing "thank" variations completely
-        if contains_thank_variation(utterance):
-            log.info("[UTTERANCE] Filtering out utterance containing 'thank' variation: '%s'", utterance)
-            return
-
-        # For utterances with confidence between 35-45%, apply additional "thank" filtering
-        if 35.0 <= confidence < 45.0 and contains_thank_variation(utterance):
-            log.info("[UTTERANCE] Filtering out low-confidence thank utterance (%.1f%%): '%s'", confidence, utterance)
             return
 
         # This is triggered by the enhanced VAD system:

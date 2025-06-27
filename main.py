@@ -442,6 +442,7 @@ async def media_websocket_endpoint(ws: WebSocket): # Renamed `media`
         second positional argument.  For backwards-compatibility we accept both
         the original 1-argument as well as the new 2-argument signature.
         """
+        nonlocal current_language
         if call_state["stop_call"]:
             return
 
@@ -837,4 +838,4 @@ async def handle_ai_turn(call_state: dict, lang: str, ws: WebSocket,
 
 def _is_trivial_thanks(text: str) -> bool:
     txt = text.strip().lower().rstrip(".!?")  # normalize punctuation
-    return txt == "thank you"
+    return txt in {"thank you", "you"}

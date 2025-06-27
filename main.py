@@ -304,16 +304,28 @@ async def media_websocket_endpoint(ws: WebSocket): # Renamed `media`
         nonlocal ai_response_task, current_language
         
         # --------------------------------------------------------------
-        # Detect language on the very first non-empty utterance and lock it
+        # Opportunistic language detection – allow switching to FR/DE/EN
+        # at any point once the confidence is high enough (≥ 0.80).
+        # We no longer *force* the language to EN on unknown input so that
+        # a later utterance in FR/DE can still change the language.
         # --------------------------------------------------------------
-        if final_utterance and current_language == "multi":
+        if final_utterance:
             lang_code, lang_conf = langid.classify(final_utterance)
-            if lang_code in ("fr", "de", "en"):
-                current_language = lang_code
-                log.info(f"[LANG-DETECT] Detected {lang_code.upper()} (conf={lang_conf:.2f}) – locking conversation language.")
-            else:
-                current_language = "en"  # default fallback
-                log.info(f"[LANG-DETECT] Unknown language ({lang_code}), defaulting to EN.")
+
+            # We only act when we are reasonably confident (>40%).
+            if lang_conf >= 0.40 and lang_code in ("fr", "de", "en"):
+                if lang_code != current_language:
+                    prev_lang = current_language
+                    current_language = lang_code
+                    log.info(
+                        f"[LANG-DETECT] Switching language {prev_lang.upper()} ➔ {lang_code.upper()} "
+                        f"(conf={lang_conf:.2f})"
+                    )
+            elif current_language == "multi":
+                # Still no confident detection → stay in neutral state.
+                log.debug(
+                    f"[LANG-DETECT] Low-confidence ({lang_code}, {lang_conf:.2f}) – keeping language 'multi'."
+                )
         
         # Handle empty transcripts (initial VAD detection)
         if not final_utterance:

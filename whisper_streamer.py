@@ -331,6 +331,8 @@ class WhisperStreamer:  # pylint: disable=too-many-instance-attributes
                 language=whisper_language,
                 beam_size=5,
                 word_timestamps=False,
+                temperature=0.0,  # reduce randomness for higher precision
+                condition_on_previous_text=False,  # avoid bias from prior segments
             )
             segments = list(segments_iter)  # materialise for repeated use
             text_parts: List[str] = [seg.text.strip() for seg in segments]

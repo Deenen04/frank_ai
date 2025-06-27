@@ -22,10 +22,7 @@ from elevenlabs.client import ElevenLabs
 from apiChatCompletion import make_openai_request
 # Decision prompt template is imported below; we build it with simple replace.
 # Import language‐specific prompt templates
-from ai_prompt import (
-    DECISION_PROMPT,
-    build_prompt,
-)
+from ai_prompt import build_prompt
 # (generate_reply is kept for non-streaming fallbacks if needed)
 from ai_executor import generate_reply  # Import the real AI function (fallback)
 # from route_call import route_call # Assuming this is defined elsewhere
@@ -221,7 +218,8 @@ async def play_greeting(lang: str, sid: str, ws: WebSocket, tts_controller: TTSC
                 "event": "media", "streamSid": sid,
                 "media": {"payload": base64.b64encode(audio).decode()}
             }))
-            await asyncio.sleep(0.01) # Small sleep to allow other tasks to run, prevent hogging
+            # Yield control to the event loop without introducing a fixed delay
+            await asyncio.sleep(0)
 
     except Exception as e:
         log.warning(f"[GREETING-ERROR-{sid}] TTS streaming interrupted: {e}", exc_info=True)
@@ -296,7 +294,10 @@ async def media_websocket_endpoint(ws: WebSocket): # Renamed `media`
         # Enhanced amplitude-based VAD parameters
         use_amplitude_vad=True,
         amplitude_threshold_db=-5.0,  # This translates to 700 RMS - more reliable speech detection
-        silence_timeout=2.0  # Longer timeout for natural speech patterns
+        silence_timeout=2.0,  # Longer timeout for natural speech patterns
+        # Increase the interval between partial transcriptions to reduce
+        # Whisper invocations (still responsive on GPU)
+        partial_interval=0.7
     )
 
     async def process_final_utterance(final_utterance: str):
@@ -698,7 +699,8 @@ async def handle_ai_turn(call_state: dict, lang: str, ws: WebSocket,
                     "streamSid": stream_sid,
                     "media": {"payload": base64.b64encode(audio).decode()},
                 }))
-                await asyncio.sleep(0.01)
+                # Yield control to the event loop without introducing a fixed delay
+                await asyncio.sleep(0)
             return True
         except asyncio.CancelledError:
             log.warning(f"[TTS-CANCELLED-{stream_sid}] TTS task was cancelled.")
@@ -721,6 +723,14 @@ async def handle_ai_turn(call_state: dict, lang: str, ws: WebSocket,
 
     # Build single prompt for the backend
     prompt_for_chat = build_prompt(history_for_prompt, lang_selected)
+    # Ask the model to append an explicit action tag so we can avoid a
+    # second LLM round-trip.  The tag must be either [[END]] or
+    # [[CONTINUE]] and appear **after** the assistant reply.
+    prompt_for_chat += (
+        "\n\nAt the very end of your reply output exactly the tag [[END]] "
+        "if the conversation is finished or [[CONTINUE]] if it should "
+        "continue.  Do not output anything after the tag."
+    )
 
     # --------------------------------------------------------------
     # Fetch the full assistant reply in one request (no streaming)
@@ -734,9 +744,24 @@ async def handle_ai_turn(call_state: dict, lang: str, ws: WebSocket,
             temperature=0.3,
             top_p=0.95,
         ) or ""
+        # ------------------------------------------------------------------
+        # Parse the action tag emitted by the model so we know whether to end
+        # the call.  Remove the tag from the text that will be synthesised.
+        # ------------------------------------------------------------------
+        if "[[END]]" in ai_response_text:
+            conversation_status = "ended"
+            ai_response_text = ai_response_text.replace("[[END]]", "").strip()
+        else:
+            conversation_status = "continue"
+            ai_response_text = ai_response_text.replace("[[CONTINUE]]", "").strip()
+        # If the model decided to end, override with a fixed farewell so the
+        # caller always hears a concise, branded goodbye.
+        if conversation_status == "ended":
+            ai_response_text = FAREWELL_LINES.get(lang_selected, FAREWELL_LINES["en"])
     except Exception as exc:
         log.error(f"[AI_TURN-{stream_sid}] Error while generating AI reply: {exc}", exc_info=True)
         ai_response_text = ""
+        conversation_status = "continue"
 
     # Reset accounting for this AI turn
     tts_controller.reset_spoken_text()
@@ -780,30 +805,9 @@ async def handle_ai_turn(call_state: dict, lang: str, ws: WebSocket,
         flush=True,
     )
 
-    # ------------------------------------------------------------------
-    # Decide ROUTE / END / CONTINUE using the full reply
-    # ------------------------------------------------------------------
-    conversation_status = "continue"
-    try:
-        decision_prompt = DECISION_PROMPT.replace("{ai_reply}", ai_response_text)
-        decision_raw = await make_openai_request(
-            api_key_manager=None,
-            model="openchat/openchat-3.5-1210",
-            prompt=decision_prompt,
-            max_tokens=20,
-            temperature=0.0,
-            top_p=1.0,
-        ) or ""
-        dec = decision_raw.strip().upper()
-        if dec == "ROUTE":
-            conversation_status = "routed"
-        elif dec == "END":
-            conversation_status = "ended"
-    except Exception as e:
-        log.error(f"[AI_TURN-{stream_sid}] Failed to classify conversation status: {e}")
-
-    if call_state["twilio_call_sid"] and conversation_status == "routed":
-        call_state["initiate_transfer"] = True
+    # No second LLM call needed — conversation_status was set above based
+    # on the explicit tag returned by the model.  "route" is no longer
+    # supported.
 
     tts_controller.is_speaking = False  # ensure flag reset when turn done / interrupted
 

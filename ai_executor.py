@@ -86,7 +86,7 @@ async def generate_reply(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     dec = decision_raw.strip().upper()
     status = "continue"
-    if dec == "ROUTE": status = "routed"
-    elif dec == "END": status = "ended"
+    if dec == "END":
+        status = "ended"
 
     return { "ai_message": raw_text, "conversation_status": status }

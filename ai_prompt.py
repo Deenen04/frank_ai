@@ -1,15 +1,14 @@
 # —————————————————————————————————————————————————————————————————————————————
 # 2) Classify the assistant reply: should we continue booking, route to a human, or end?
 # —————————————————————————————————————————————————————————————————————————————
-DECISION_PROMPT = """You are a system that reads a receptionist AI's last message and decides one of the following actions:
-- ROUTE: if the caller should be transferred to a human agent.
-- END: if the user say byebye or goodbye
-- CONTINUE: otherwise, if the booking conversation should continue.
+DECISION_PROMPT = """You are a system that reads the receptionist AI's last message and decides whether the conversation is finished.
+- END: if the assistant message indicates the booking is complete or contains a clear goodbye.
+- CONTINUE: otherwise, the booking conversation should go on.
 
 Assistant reply:
 {ai_reply}
 
-Output exactly one word: ROUTE, END, or CONTINUE.
+Output exactly one word: END or CONTINUE.
 """
 
 # —————————————————————————————————————————————————————————————————————————————

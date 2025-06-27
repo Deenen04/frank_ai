@@ -70,7 +70,7 @@ log = logging.getLogger("voicebot")
 deepgram_log = logging.getLogger("deepgram_streamer")
 deepgram_log.setLevel(logging.DEBUG)
 
-VOICE_IDS = {"en": "kdnRe2koJdOK4Ovxn2DI", "fr": "ZQFCSsF1tIcjtMZJ6VCA", "de": "v3V1d2rk6528UrLKRuy8"}
+VOICE_IDS = {"en": "kdnRe2koJdOK4Ovxn2DI", "fr": "F1toM6PcP54s45kOOAyV", "de": "v3V1d2rk6528UrLKRuy8"}
 FAREWELL_LINES = {"en": "Thanks for calling. Goodbye.", "fr": "Merci d'avoir appelé. Au revoir.", "de": "Danke für Ihren Anruf. Auf Wiedersehen."}
 GREETING_LINES = {"en": "Hi, This is Frank Babar Clinic, I am here to assist you book an appointment with us today. How can I help you?", "fr": "Bonjour, comment puis-je vous aider?", "de": "Hallo, wie kann ich Ihnen helfen?"}
 END_DELAY_SEC = 1 # Reduced for faster testing
@@ -199,7 +199,7 @@ async def play_greeting(lang: str, sid: str, ws: WebSocket, tts_controller: TTSC
     log.info(f"[GREETING-{sid}] Playing: '{text}'")
     try:
         tts_controller.current_generator = tts_client.text_to_speech.stream(
-            text=text, voice_id=voice_id, model_id="eleven_v3", # eleven_flash_v2_5 is not a public model name. Use eleven_multilingual_v2 or eleven_turbo_v2
+            text=text, voice_id=voice_id, model_id="eleven_multilingual_v2", # eleven_flash_v2_5 is not a public model name. Use eleven_multilingual_v2 or eleven_turbo_v2
             output_format="ulaw_8000", optimize_streaming_latency=0
         )
         for audio_chunk_count, audio in enumerate(tts_controller.current_generator):
@@ -680,7 +680,7 @@ async def handle_ai_turn(call_state: dict, lang: str, ws: WebSocket,
             tts_controller.current_generator = tts_client.text_to_speech.stream(
                 text=text_chunk,
                 voice_id=voice_id,
-                model_id="eleven_v3",
+                model_id="eleven_multilingual_v2",
                 output_format="ulaw_8000",
                 optimize_streaming_latency=0,
             )

@@ -386,11 +386,27 @@ async def media_websocket_endpoint(ws: WebSocket): # Renamed `media`
             return
 
     def on_dg_speech_start():
-        # Pure VAD signal – we now wait for actual transcript before interrupting TTS.
-        # Leaving this as a debug notification only.
+        """Handle immediate speech start event from Whisper VAD.
+
+        We interrupt any ongoing TTS *instantly* so the caller can barge-in
+        without noticeable latency (≈ <100 ms from first voice activity).
+        """
         if call_state["stop_call"]:
             return
-        log.debug("[DG] Speech start detected (waiting for transcript before taking action).")
+
+        # Mark caller as currently speaking so speak_chunk exits early.
+        call_state["user_is_speaking"] = True
+
+        # If the assistant is talking – cut it off right away.
+        if tts_controller.is_speaking:
+            log.warning("[DG-START] User barge-in detected → stopping TTS immediately.")
+            tts_controller.stop_immediately()
+            # Also abort any running AI generation so we don't keep producing
+            # audio that will never be played.
+            nonlocal ai_response_task
+            if ai_response_task and not ai_response_task.done():
+                ai_response_task.cancel()
+                log.debug("[DG-START] Cancelled ongoing AI response task due to barge-in.")
 
     MIN_TRANSCRIPT_CONFIDENCE = 30.0  # percent
 

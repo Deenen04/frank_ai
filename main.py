@@ -158,7 +158,7 @@ async def answer_call(_request: Request, From: str = Form(...), To: str = Form(.
     return HTMLResponse(str(vr), media_type="application/xml")
 
 
-## FIX: Rewrote play_greeting to be non-blocking and interruptible.
+## FIX: Rewritten play_greeting to be non-blocking and interruptible.
 async def play_greeting(lang: str, sid: str, ws: WebSocket, tts_controller: TTSController, state: dict, send_twilio_clear):
     voice_id, text = VOICE_IDS.get(lang, VOICE_IDS["en"]), GREETING_LINES.get(lang, GREETING_LINES["en"])
     
@@ -253,12 +253,12 @@ async def media_websocket_endpoint(ws: WebSocket):
     ## FIX: VAD settings are now much more sensitive to catch user speech immediately.
     deepgram_streamer = DeepgramStreamer(
         api_key=DEEPGRAM_API_KEY, encoding="mulaw", sample_rate=8000,
-        interim_results=False, vad_events=True, punctuate=True,
+        interim_results=True, vad_events=True, punctuate=True,
         model='groq-whisper-large-v3-turbo', language=current_language,
         use_amplitude_vad=True,
         amplitude_threshold_db=-30.0, # Much more sensitive than -5.0
         silence_timeout=0.8, # Respond to silence faster
-        partial_interval=0.7
+        partial_interval=0.3  # emit partials every 300 ms for rapid barge-in
     )
 
     async def process_final_utterance(final_utterance: str):
@@ -304,6 +304,12 @@ async def media_websocket_endpoint(ws: WebSocket):
         transcript = args[0] if args else ""
         if not transcript.strip(): return
         call_state["user_is_speaking"] = True
+        # Fallback barge-in: if the speech-start VAD was missed but we
+        # already have a (partial) transcript, cut TTS right now.
+        if tts_controller.is_speaking:
+            log.warning("[DG-TRANSCRIPT] Barge-in detected via transcript → stopping TTS.")
+            asyncio.create_task(tts_controller.stop_immediately())
+            asyncio.create_task(send_twilio_clear())
         display_live_transcript(call_state["caller_phone_number"], transcript)
 
     def on_dg_utterance(*args):

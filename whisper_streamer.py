@@ -82,13 +82,21 @@ class WhisperStreamer:  # pylint: disable=too-many-instance-attributes
         self._model: Optional[WhisperModel] = None
 
         # --- amplitude VAD ------------------------------------------------
-        if self.encoding in {"mulaw", "ulaw"}:
-            # The user requested a *fixed* minimum RMS of 1000 for μ-law.
-            # Anything below that is treated as silence / noise.
-            self._amp_threshold_linear = 2000.0
-        else:
-            # Linear PCM: convert dB value to linear scale.
-            self._amp_threshold_linear = 32768 * (10 ** (amplitude_threshold_db / 20.0))
+        # --------------------------------------------------------------
+        # Amplitude threshold (linear RMS value)
+        # --------------------------------------------------------------
+        # Previous versions used a *fixed* RMS of ≈2000 for μ-law which
+        # often proved too insensitive – barge-in was recognised only
+        # once the full utterance had already been spoken.  We now
+        # honour the *amplitude_threshold_db* parameter **regardless of
+        # encoding** so callers can tune the VAD sensitivity (e.g.
+        # ‑30 dB for very sensitive, ‑10 dB for robust).
+
+        # Convert dBFS → linear RMS referenced to 32768 (16-bit max).
+        self._amp_threshold_linear = 32768 * (10 ** (amplitude_threshold_db / 20.0))
+
+        # Guard against pathological values
+        self._amp_threshold_linear = max(100.0, self._amp_threshold_linear)
 
         self._last_voice_ts: Optional[float] = None
         self._speaking = False
@@ -127,7 +135,7 @@ class WhisperStreamer:  # pylint: disable=too-many-instance-attributes
         self._allowed_languages = None if allowed_languages is None else [l.lower() for l in allowed_languages]
 
         log.info(
-            "[Whisper-INIT] Using faster-whisper model '%s', amp-threshold %.1f dB (→ %.0f), silence %.1fs, allowed=%s",
+            "[Whisper-INIT] Using faster-whisper model '%s', amp-thr %.1f dB → %.0f, silence %.1fs, allowed=%s",
             self._model_name,
             amplitude_threshold_db,
             self._amp_threshold_linear,

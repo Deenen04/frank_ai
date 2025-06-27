@@ -56,9 +56,29 @@ class WhisperStreamer:  # pylint: disable=too-many-instance-attributes
         self._punctuate = punctuate
         self._interim_results = interim_results
         self._model_name = model
-        if self._model_name not in {"tiny", "base", "small", "medium", "large", "large-v2", "large-v3"}:
-            log.warning("[Whisper] Unknown model '%s'. Falling back to 'small'.", self._model_name)
+
+        # ------------------------------------------------------------------
+        # Alias & validation: allow popular community model repo names
+        # ------------------------------------------------------------------
+        alias_map = {
+            # Groq alias → CT2 optimized repo for Faster-Whisper
+            "groq-whisper-large-v3-turbo": "deepdml/faster-whisper-large-v3-turbo-ct2",
+            # Alternate community aliases
+            "whisper-large-v3-turbo": "deepdml/faster-whisper-large-v3-turbo-ct2",
+        }
+
+        if self._model_name in alias_map:
+            log.info("[Whisper] Resolving alias '%s' → '%s'", self._model_name, alias_map[self._model_name])
+            self._model_name = alias_map[self._model_name]
+
+        # Allow *any* HuggingFace repo path or built-in size alias.
+        # Only fallback to 'small' if we detect a *size* alias that is unknown.
+        size_aliases = {"tiny", "base", "small", "medium", "large", "large-v2", "large-v3", "large-v3-turbo"}
+
+        if "/" not in self._model_name and self._model_name not in size_aliases:
+            log.warning("[Whisper] Unknown size alias '%s'. Falling back to 'small'.", self._model_name)
             self._model_name = "small"
+
         self._model: Optional[WhisperModel] = None
 
         # --- amplitude VAD ------------------------------------------------

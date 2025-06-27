@@ -14,6 +14,25 @@ Output exactly one word: END or CONTINUE.
 # —————————————————————————————————————————————————————————————————————————————
 #  NEW  –  Unified system prompts (no placeholders) & helper utilities
 # —————————————————————————————————————————————————————————————————————————————
+import langid
+from typing import List, Dict
+
+langid.set_languages(["en", "fr", "de"])
+
+def detect_language_from_history(history_lines: List[str]) -> str:
+    """Detect language from the last user message in the history."""
+    last_user_msg = ""
+    for line in reversed(history_lines):
+        if line.startswith("Human:") or line.startswith("User:"):
+            last_user_msg = line.split(":", 1)[1].strip()
+            break
+    
+    if last_user_msg:
+        lang, _ = langid.classify(last_user_msg)
+        if lang in {'en', 'fr', 'de'}:
+            return lang
+    return 'en' # default
+
 SYSTEM_PROMPT_EN = """
 You are having a conversation with a user.
 You are a receptionist.
@@ -82,8 +101,6 @@ def get_system_prompt(lang: str = "en") -> str:
 # -------------------------------------------------------------------
 # Helper to convert our simple line-based history to OpenAI chat format
 # -------------------------------------------------------------------
-from typing import List, Dict
-
 def build_messages(history_lines: List[str], lang: str = "en") -> List[Dict[str, str]]:
     """Convert ['Human: Hi', 'AI: Hello'] history into chat messages list."""
     messages: List[Dict[str, str]] = [

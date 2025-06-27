@@ -10,7 +10,7 @@ from string import Formatter
 from typing import Any, Dict, List
 
 from apiChatCompletion import APIKeyManager, make_openai_request
-from ai_prompt import DECISION_PROMPT, build_messages
+from ai_prompt import DECISION_PROMPT, build_messages, detect_language_from_history
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -41,9 +41,11 @@ async def generate_reply(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
     Stateless helper.  `payload` **must** contain:
         • conversation_history: List[str]  (['Human: …', 'AI: …', …])
+    `lang` is optional and will be auto-detected if not provided.
     Returns {ai_message, decision} where decision in {'continue','routed','ended'}
     """
     history: List[str] = payload["conversation_history"]
+    lang = payload.get("lang") or detect_language_from_history(history)
 
     # ✅ FIX: Take only the last N lines of history to avoid exceeding the model's context limit.
     if len(history) > MAX_HISTORY_LINES:
@@ -51,7 +53,7 @@ async def generate_reply(payload: Dict[str, Any]) -> Dict[str, Any]:
         history = history[-MAX_HISTORY_LINES:]
 
     # Build chat-style messages for the hosted backend
-    messages = build_messages(history, lang="en")
+    messages = build_messages(history, lang=lang)
 
     # ✅ DEBUG: Log messages being sent to the AI.
     if DEBUG_PROMPTS:

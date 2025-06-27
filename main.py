@@ -383,6 +383,13 @@ async def media_websocket_endpoint(ws: WebSocket):
                 if deepgram_streamer.is_open():
                     await deepgram_streamer.send(audio_bytes)
 
+            elif event_type == "mark":
+                mark_name = message.get("mark", {}).get("name")
+                log.info(f"[WS-MARK] Received mark: {mark_name}")
+                if mark_name == "end_of_ai_turn":
+                    tts_controller.is_speaking = False
+                    log.debug("[TTS] AI turn complete, TTS speaking set to False.")
+
             elif event_type == "stop":
                 log.info(f"[WS-STOP] Received stop event. Call is ending.")
                 break
@@ -422,7 +429,6 @@ async def handle_ai_turn(call_state: dict, lang: str, ws: WebSocket,
         if not text_chunk.strip() or call_state["stop_call"]: return True # Not a failure, just nothing to say
         
         log.info(f"[TTS-SPEAK-{stream_sid}] AI ➔ {text_chunk[:60].replace(chr(10), ' ')}")
-        tts_controller.is_speaking = True
         tts_controller.audio_queue = asyncio.Queue()
 
         try:
@@ -453,9 +459,6 @@ async def handle_ai_turn(call_state: dict, lang: str, ws: WebSocket,
             log.warning(f"[TTS-ERROR-{stream_sid}] TTS stream exception: {e}", exc_info=True)
             await tts_controller.stop_immediately()
             return False
-        finally:
-            if tts_controller.is_speaking: # if we weren't interrupted
-                tts_controller.is_speaking = False
 
     # --- AI and prompt logic (remains the same) ---
     prompt_for_chat = build_prompt(conversation_history[-100:], lang)
@@ -482,6 +485,12 @@ async def handle_ai_turn(call_state: dict, lang: str, ws: WebSocket,
         log.error(f"[AI_TURN-{stream_sid}] Error generating AI reply: {exc}", exc_info=True)
         ai_response_text = ""
         conversation_status = "continue"
+    
+    if not ai_response_text.strip():
+        log.info(f"[AI_TURN-{stream_sid}] No AI response, skipping TTS.")
+        return # Nothing to say.
+
+    tts_controller.is_speaking = True # Set speaking state to True before we start sending audio
     
     # --- Speaking logic using the new non-blocking function ---
     tts_controller.reset_spoken_text()
@@ -518,6 +527,8 @@ async def handle_ai_turn(call_state: dict, lang: str, ws: WebSocket,
             await ws.send_text(json.dumps({"event": "mark", "streamSid": stream_sid, "mark": {"name": "end_of_ai_turn"}}))
         except Exception as e:
             log.error(f"[AI_TURN-MARK-ERROR-{stream_sid}] Failed to send mark: {e}")
+    elif not all_spoken_successfully:
+        tts_controller.is_speaking = False
 
 def _is_trivial_thanks(text: str) -> bool:
     txt = text.strip().lower().rstrip(".!?")

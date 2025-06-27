@@ -45,8 +45,8 @@ class WhisperStreamer:  # pylint: disable=too-many-instance-attributes
         allowed_languages: Optional[List[str]] = None,
         use_amplitude_vad: bool = True,
         amplitude_threshold_db: float = -5.0,
-        silence_timeout: float = 1.2,
-        partial_interval: float = 0.6,  # seconds between partial transcripts
+        silence_timeout: float = 0.7,
+        partial_interval: float = 0  # seconds between partial transcripts
     ):
         # --- public config ------------------------------------------------
         self.encoding = encoding.lower()

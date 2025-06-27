@@ -130,27 +130,33 @@ def build_prompt(history_lines: List[str], lang: str = "en") -> str:
     """Return a *single* prompt string ready for the hosted LLM.
 
     Format:
-        <|begin_of_text|>
         <system_prompt>
         
-        Human: ...
-        AI: ...
-        Human: ...
+        User: ...
+        Assistant: ...
+        User: ...
         
-        AI:
+        Assistant:
 
-    We keep the simple "Human:" / "AI:" prefixes so the model can
-    differentiate turns without the verbose JSON chat format. A final
-    trailing "AI:" cue is appended so the model continues writing from
-    the assistant's perspective.
+    We remove the "Human:" / "AI:" prefixes and use "User:" / "Assistant:" 
+    instead to prevent the AI from thinking it needs to include these 
+    prefixes in its responses.
     """
     system_prompt = get_system_prompt(lang)
 
-    # We no longer prepend the special ``<|begin_of_text|>`` token. The
-    # backend model receives a plain prompt that starts directly with the
-    # system instructions followed by the conversation history.
+    # Process history lines to remove "Human:" and "AI:" prefixes
+    processed_lines = []
+    for line in history_lines:
+        if line.startswith("Human:"):
+            content = line.split(":", 1)[1].strip()
+            processed_lines.append(f"User: {content}")
+        elif line.startswith("AI:"):
+            content = line.split(":", 1)[1].strip()
+            processed_lines.append(f"Assistant: {content}")
+        else:
+            processed_lines.append(line)
+
     prompt_parts: List[str] = [system_prompt, ""]
-    prompt_parts.extend(history_lines)
-    # Final blank line so the model continues the conversation without needing a label
-    prompt_parts.append("")
+    prompt_parts.extend(processed_lines)
+    prompt_parts.append("Assistant:")
     return "\n".join(prompt_parts)

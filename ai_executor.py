@@ -69,11 +69,17 @@ async def generate_reply(payload: Dict[str, Any]) -> Dict[str, Any]:
     raw_text = raw_text or ""
 
     # ------------------------------------------------------------------
-    # Secondary call: classify ROUTE / END / CONTINUE.  We keep this as a
-    # *prompt* request for simplicity (small context).
+    # Secondary call: classify END / CONTINUE based on the *user's* last
+    # message (not the assistant reply).
     # ------------------------------------------------------------------
+    # Find last user message in history
+    last_user_msg = ""
+    for line in reversed(history):
+        if line.startswith("Human:") or line.startswith("User:"):
+            last_user_msg = line.split(":", 1)[1].strip()
+            break
 
-    class_prompt = DECISION_PROMPT.replace("{ai_reply}", raw_text)
+    class_prompt = DECISION_PROMPT.replace("{user_reply}", last_user_msg)
 
     decision_raw = await make_openai_request(
         api_key_manager=None,

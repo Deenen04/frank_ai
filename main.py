@@ -18,7 +18,7 @@ from starlette.websockets import WebSocketState
 from whisper_streamer import WhisperStreamer as DeepgramStreamer
 from elevenlabs.client import ElevenLabs
 from apiChatCompletion import make_openai_request
-from ai_prompt import build_prompt
+from ai_prompt import build_prompt, detect_language_from_history
 from ai_executor import generate_reply
 
 # ------------------------------------------------------------------
@@ -274,21 +274,24 @@ async def media_websocket_endpoint(ws: WebSocket):
             call_state["user_is_speaking"] = False
             return
         
-        # ... (Language detection logic remains the same) ...
         call_state["user_is_speaking"] = False
         display_final_turn(call_state["caller_phone_number"], final_utterance)
         
         if ai_response_task and not ai_response_task.done():
             ai_response_task.cancel()
         
-        # Stop any residual speaking and clear buffer
         await tts_controller.stop_immediately()
         await send_twilio_clear()
         
         conversation_history.append(f"Human: {final_utterance}")
+
+        new_lang = detect_language_from_history(conversation_history)
+        if new_lang != current_language:
+            log.info(f"[LANG-DETECT] Language switched from '{current_language}' to '{new_lang}'")
+            current_language = new_lang
+
         ai_response_task = asyncio.create_task(
-            handle_ai_turn(call_state, current_language, ws, conversation_history, tts_controller, send_twilio_clear)
-        )
+            handle_ai_turn(call_state, current_language, ws, conversation_history, tts_controller, send_twilio_clear))
 
     def on_dg_speech_start():
         log.warning("!!! VAD SPEECH START DETECTED !!! Barge-in initiated.")

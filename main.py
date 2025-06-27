@@ -445,15 +445,38 @@ async def media_websocket_endpoint(ws: WebSocket): # Renamed `media`
         if call_state["stop_call"]:
             return
 
-        # Parse *args* → (utterance, confidence)
+        # Parse *args* → (utterance, confidence[, detected_lang])
         if len(args) == 1:
             utterance = args[0]
             confidence = 100.0  # assume perfect confidence when value missing (e.g. Deepgram backend)
-        else:
+            detected_lang = None
+        elif len(args) == 2:
             utterance, confidence = args[:2]
+            detected_lang = None
+        else:
+            utterance, confidence, detected_lang = args[:3]
 
-        # Log confidence for debugging
-        log.info("[UTTERANCE] Confidence %.1f%% — '%s'", confidence, utterance)
+        # Log confidence and language for debugging
+        log.info(
+            "[UTTERANCE] Confidence %.1f%% — '%s' (lang=%s)",
+            confidence,
+            utterance,
+            detected_lang,
+        )
+
+        # Ignore trivial "thank you" style utterances entirely
+        if _is_trivial_thanks(utterance):
+            log.debug("[UTTERANCE] Ignoring trivial thank-you phrase.")
+            return
+
+        # If Whisper provided a language (en/fr/de), prefer it over langid
+        if detected_lang in ("en", "fr", "de") and detected_lang != current_language:
+            log.info(
+                "[LANG-DETECT] Whisper suggests switch %s ➔ %s",
+                current_language.upper(),
+                detected_lang.upper(),
+            )
+            current_language = detected_lang
 
         # Discard low-confidence utterances
         if confidence < MIN_WHISPER_CONFIDENCE:
@@ -809,3 +832,9 @@ async def handle_ai_turn(call_state: dict, lang: str, ws: WebSocket,
             log.error(f"[AI_TURN-MARK-ERROR-{stream_sid}] Failed to send mark: {e}", exc_info=True)
     else:
         log.info(f"[AI_TURN-MARK-SKIP-{stream_sid}] Skipping end_of_ai_turn mark (spoken_successfully={all_spoken_successfully}, stop_call={call_state['stop_call']}, user_speaking={call_state.get('user_is_speaking')}).")
+
+# Helper to detect trivial courtesy phrases that should be ignored
+
+def _is_trivial_thanks(text: str) -> bool:
+    txt = text.strip().lower().rstrip(".!?")  # normalize punctuation
+    return txt == "thank you"

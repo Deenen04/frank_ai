@@ -371,8 +371,8 @@ class WhisperStreamer:  # pylint: disable=too-many-instance-attributes
             cb_utt = self._callbacks.get("on_utterance")
             if cb_utt and is_final:
                 try:
-                    # Forward confidence as second positional argument (backward-compatible)
-                    cb_utt(transcript, confidence)
+                    # Forward confidence as second positional argument and detected language as third
+                    cb_utt(transcript, confidence, whisper_language)
                 except Exception as e:
                     log.error("on_utterance callback error: %s", e)
 

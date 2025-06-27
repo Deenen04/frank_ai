@@ -407,6 +407,8 @@ async def media_websocket_endpoint(ws: WebSocket): # Renamed `media`
             if ai_response_task and not ai_response_task.done():
                 ai_response_task.cancel()
                 log.debug("[DG-START] Cancelled ongoing AI response task due to barge-in.")
+            # Flush any audio that Twilio still has buffered.
+            asyncio.create_task(_send_twilio_clear())
 
     MIN_TRANSCRIPT_CONFIDENCE = 30.0  # percent
 
@@ -705,10 +707,14 @@ async def handle_ai_turn(call_state: dict, lang: str, ws: WebSocket,
                 if call_state.get("user_is_speaking"):
                     log.warning(f"[TTS-CUTOFF-{stream_sid}] User started speaking. Stopping AI TTS.")
                     tts_controller.stop_immediately()
+                    # Flush Twilio buffer so playback stops instantly
+                    await _send_twilio_clear()
                     return False
                 if call_state["stop_call"] or ws.client_state != WebSocketState.CONNECTED:
                     log.warning(f"[TTS-STOP-{stream_sid}] Call stop or WS disconnected. Stopping AI TTS.")
                     tts_controller.stop_immediately()
+                    # Flush Twilio buffer so playback stops instantly
+                    await _send_twilio_clear()
                     return False
                 await ws.send_text(json.dumps({
                     "event": "media",
@@ -721,10 +727,14 @@ async def handle_ai_turn(call_state: dict, lang: str, ws: WebSocket,
         except asyncio.CancelledError:
             log.warning(f"[TTS-CANCELLED-{stream_sid}] TTS task was cancelled.")
             tts_controller.stop_immediately()
+            # Flush Twilio buffer so playback stops instantly
+            await _send_twilio_clear()
             return False
         except Exception as e:
             log.warning(f"[TTS-ERROR-{stream_sid}] TTS stream exception: {e}", exc_info=True)
             tts_controller.stop_immediately()
+            # Flush Twilio buffer so playback stops instantly
+            await _send_twilio_clear()
             return False
         finally:
             pass
@@ -861,3 +871,16 @@ async def handle_ai_turn(call_state: dict, lang: str, ws: WebSocket,
 def _is_trivial_thanks(text: str) -> bool:
     txt = text.strip().lower().rstrip(".!?")  # normalize punctuation
     return txt in {"thank you", "you"}
+
+async def _send_twilio_clear():
+    """Send a Twilio `clear` event to drop any audio still buffered on their side."""
+    if ws.client_state != WebSocketState.CONNECTED or not call_state.get("twilio_stream_sid"):
+        return
+    try:
+        await ws.send_text(json.dumps({
+            "event": "clear",
+            "streamSid": call_state["twilio_stream_sid"]
+        }))
+        log.debug("[TWI-CLEAR] Sent clear event to Twilio.")
+    except Exception as exc:
+        log.warning(f"[TWI-CLEAR] Failed to send clear event: {exc}")

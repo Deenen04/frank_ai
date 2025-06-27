@@ -704,18 +704,21 @@ async def handle_ai_turn(call_state: dict, lang: str, ws: WebSocket,
                 optimize_streaming_latency=0,
             )
             for audio_chunk_count, audio in enumerate(tts_controller.current_generator):
+                # Re-check immediately after retrieving chunk *before* sending
+                if not tts_controller.is_speaking:
+                    log.debug(f"[TTS-BREAK-{stream_sid}] is_speaking turned false — breaking loop before send.")
+                    break
                 if call_state.get("user_is_speaking"):
                     log.warning(f"[TTS-CUTOFF-{stream_sid}] User started speaking. Stopping AI TTS.")
                     tts_controller.stop_immediately()
-                    # Flush Twilio buffer so playback stops instantly
                     await _send_twilio_clear()
-                    return False
+                    break
                 if call_state["stop_call"] or ws.client_state != WebSocketState.CONNECTED:
                     log.warning(f"[TTS-STOP-{stream_sid}] Call stop or WS disconnected. Stopping AI TTS.")
                     tts_controller.stop_immediately()
-                    # Flush Twilio buffer so playback stops instantly
                     await _send_twilio_clear()
-                    return False
+                    break
+
                 await ws.send_text(json.dumps({
                     "event": "media",
                     "streamSid": stream_sid,

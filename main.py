@@ -729,7 +729,8 @@ async def handle_ai_turn(call_state: dict, lang: str, ws: WebSocket,
     prompt_for_chat += (
         "\n\nAt the very end of your reply output exactly the tag [[END]] "
         "if the conversation is finished or [[CONTINUE]] if it should "
-        "continue.  Do not output anything after the tag."
+        "continue.  Do not output anything after the tag." 
+        "\n\nAssistant:"
     )
 
     # --------------------------------------------------------------
